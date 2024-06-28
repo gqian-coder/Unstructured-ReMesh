@@ -45,7 +45,6 @@ int main(int argc, char **argv) {
     int cnt_argv = 1;
     std::string dpath(argv[cnt_argv++]);
     std::string fname(argv[cnt_argv++]);
-    double s = std::stof(argv[cnt_argv++]);
     double tol = std::stof(argv[cnt_argv++]);
     int n_vars = std::stoi(argv[cnt_argv++]);
     std::vector<std::string> var_name(n_vars);
@@ -58,15 +57,12 @@ int main(int argc, char **argv) {
     adios2::IO writer_io = ad.DeclareIO("Output");
 
     if (rank==0) {
-        std::cout << "write: " << "./" + fname + ".mgard" << "\n";
+        std::cout << "write: " << "./" + fname + ".compressed" << "\n";
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".mgard", adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open(fname + ".compressed", adios2::Mode::Write);
 
-    size_t compressed_size_step = 0;
-    std::vector<size_t> compressed_size(n_vars, 0);
-    std::vector<size_t> data_size(n_vars, 0);
     size_t ts = 0;
     adios2::Variable<int32_t> var_ad2_v2;
     std::vector<int32_t> var_in_v2;
@@ -76,6 +72,9 @@ int main(int argc, char **argv) {
     for (int i=0; i<n_vars; i++) {
     	var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
     }
+
+    adios2::Operator op = ad.DefineOperator("mgardplus", "mgardplus");
+
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -102,35 +101,19 @@ int main(int argc, char **argv) {
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
+	    var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
                 std::cout << "blockID = " << info.BlockID << "\n";
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
-                data_size[i] += var_in.size();
 		std::cout << "total nodes:  " << var_in.size() << "\n";
 		std::cout << var_in[0] << ", "<< var_in[10] << "\n";
-		mgard_x::Config config;
-    		config.lossless = mgard_x::lossless_type::Huffman_Zstd;
-		config.dev_type = mgard_x::device_type::CUDA;
-		config.dev_id   = 2;
-		std::vector<mgard_x::SIZE> shape{var_in.size()};
-		void *compressed_array_cpu = NULL;
-		mgard_x::compress(1, mgard_x::data_type::Double, shape, abs_tol, s,
-                    mgard_x::error_bound_type::ABS, var_in.data(),
-                    compressed_array_cpu, compressed_size_step, config, false);
-		void *decompressed_array_cpu = NULL;
-		mgard_x::decompress(compressed_array_cpu, compressed_size_step, 
-                     decompressed_array_cpu, config, false);
-		compressed_size[i] += compressed_size_step;
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
-                writer.Put<double>(var_out[i], (double *)decompressed_array_cpu, adios2::Mode::Sync);
+                writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
-		free(compressed_array_cpu);
-		free(decompressed_array_cpu);
 		if (info.BlockID==2) break;
             }
         }
@@ -140,14 +123,6 @@ int main(int argc, char **argv) {
     }
     reader.Close();
     writer.Close();
-    std::vector<size_t> gb_compressed(n_vars), lSize(n_vars);
-    for (int i=0; i<n_vars; i++) {
-        MPI_Allreduce(&compressed_size[i], &gb_compressed[i], 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
-        MPI_Allreduce(&data_size[i], &lSize[i], 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
-        if (rank == 0) {
-             printf("%s: compression ratio = %.4f (%ld / %ld)\n", var_name[i].c_str(), ((double)lSize[i]*8) / gb_compressed[i], lSize[i]*8, gb_compressed[i]);
-        }
-    }
 
     MPI_Finalize();
     return 0;

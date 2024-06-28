@@ -7,7 +7,7 @@
 #include <dirent.h>
 
 #include "adios2.h"
-#include "mgard/compress_x.hpp"
+#include "mgard/compress.hpp"
 #include <zstd.h>
 #include <time.h>
 
@@ -31,7 +31,7 @@ void error_calc(T *var_in, T *var_out, size_t data_size, T tolerance)
     std::cout << "Error print out: \n";
     std::cout << "requested error: ";
     std::cout << "l2 abs err = " << tolerance << "\n";
-
+    
     std::cout << "L-inf: " << abs_err << ", relative by data_norm: " << abs_err / norm_data << ", by value range: "<< abs_err / (maxv-minv) << "\n";
     std::cout << "L2: " << rmse << ", relative by data_norm: " << rmse / norm_data << ", by value range: "<< rmse / (maxv-minv) << "\n";
 }
@@ -62,19 +62,17 @@ int main(int argc, char **argv) {
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".mgard", adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open("./" + fname + ".mgard", adios2::Mode::Write);
 
-    size_t compressed_size_step = 0;
     std::vector<size_t> compressed_size(n_vars, 0);
     std::vector<size_t> data_size(n_vars, 0);
     size_t ts = 0;
     adios2::Variable<int32_t> var_ad2_v2;
     std::vector<int32_t> var_in_v2;
-    //size_t compressed_size;
   
     std::vector<adios2::Variable<double>> var_out(n_vars);
     for (int i=0; i<n_vars; i++) {
-    	var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
+        var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
     }
     while (true) {
         // Begin step
@@ -87,51 +85,39 @@ int main(int argc, char **argv) {
         else if (read_status != adios2::StepStatus::OK) {
             break;
         }
-	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
-        
+
+        writer.BeginStep();
         for (int i=0; i<n_vars; i++) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
             auto bi = reader.BlocksInfo(var_ad2, ts);
             size_t nBlocks = bi.size();
             std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
-            double minv = var_ad2.Min();
-            double maxv = var_ad2.Max();
-            //size_t b = 0;//rank;
-            double abs_tol = tol * (maxv-minv);
-            if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
                 std::cout << "blockID = " << info.BlockID << "\n";
+		double minv = var_ad2.Min();
+	        double maxv = var_ad2.Max();
+		double abs_tol = tol * (maxv-minv);
+                std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
                 data_size[i] += var_in.size();
 		std::cout << "total nodes:  " << var_in.size() << "\n";
+                const mgard::TensorMeshHierarchy<1, double> hierarchy({var_in.size()});
+                const mgard::CompressedDataset<1, double> compressed = mgard::compress(hierarchy, var_in.data(), s, abs_tol);
+                const mgard::DecompressedDataset<1, double> decompressed = mgard::decompress(compressed);
 		std::cout << var_in[0] << ", "<< var_in[10] << "\n";
-		mgard_x::Config config;
-    		config.lossless = mgard_x::lossless_type::Huffman_Zstd;
-		config.dev_type = mgard_x::device_type::CUDA;
-		config.dev_id   = 2;
-		std::vector<mgard_x::SIZE> shape{var_in.size()};
-		void *compressed_array_cpu = NULL;
-		mgard_x::compress(1, mgard_x::data_type::Double, shape, abs_tol, s,
-                    mgard_x::error_bound_type::ABS, var_in.data(),
-                    compressed_array_cpu, compressed_size_step, config, false);
-		void *decompressed_array_cpu = NULL;
-		mgard_x::decompress(compressed_array_cpu, compressed_size_step, 
-                     decompressed_array_cpu, config, false);
-		compressed_size[i] += compressed_size_step;
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
-                writer.Put<double>(var_out[i], (double *)decompressed_array_cpu, adios2::Mode::Sync);
+                writer.Put<double>(var_out[i], decompressed.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
+                compressed_size[i] += compressed.size();
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
-		free(compressed_array_cpu);
-		free(decompressed_array_cpu);
-		if (info.BlockID==2) break;
+		error_calc(var_in.data(), (double *)decompressed.data(), var_in.size(), abs_tol);
+                if (info.BlockID==2) break;
             }
         }
         std::cout << "end\n"; 

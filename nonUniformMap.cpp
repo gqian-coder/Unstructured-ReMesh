@@ -16,7 +16,7 @@
 #define resampleThresh 1e-2
 #define threshGrid 0.85
 
-int check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t &nGridSparse, 
+void check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t &nGridSparse, 
                        std::vector<size_t> &GridSparseMap, std::vector<size_t> &nCluster)
 {
     size_t nNodePt = nodeMapGrid.size();
@@ -31,17 +31,20 @@ int check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t &
     for (size_t i=0; i<nGridPt; i++) {
         if (GridPointVal[i]!=0) nGridSparse ++;
     }
-    size_t sparseId = 0;
-    for (size_t i=0; i<nGridPt; i ++) {
-        if (GridPointVal[i]) {
-            GridSparseMap[i] = sparseId;
-            sparseId ++;
-        }
-    }
+
     double nonZerosRate =  (double)nGridSparse / (double)nGridPt;
-    std::cout << "number of non-zero grid points: " << nGridSparse << " (" << nonZerosRate * 100.0 << "% of Grid pts) \n";
-    
-    return ( (nonZerosRate < threshGrid) ? 1 : 0);
+    //std::cout << "number of non-zero grid points: " << nGridSparse << " (" << nonZerosRate * 100.0 << "% of Grid pts) \n";
+    if (nonZerosRate < threshGrid) {
+	size_t sparseId = 0;
+    	for (size_t i=0; i<nGridPt; i ++) {
+            if (GridPointVal[i]) {
+                GridSparseMap[i] = sparseId;
+                sparseId ++;
+            }
+	}
+    } else {
+        nGridSparse = nGridPt; 
+    }
 }
 
 
@@ -278,7 +281,7 @@ void closest_GridValResi_m(std::vector<size_t> nodeMapGrid,
 }
 
 // Select "optimal" grid setup based on node spacing
-void sel_Gridspace(std::vector<double> connc, 
+void sel_Gridspace(std::vector<int64_t> connc, 
                     std::vector<std::vector<double>> nodeCoord, 
                     int n_dims, 
                     double perc, /* input <0-1.0> for <0%, 100%>th percentile */ 
@@ -300,8 +303,8 @@ void sel_Gridspace(std::vector<double> connc,
         if (nConnc>0) {
             spaceVertices.resize(nConnc-1, 1e9); 
             for (size_t i=0; i<nConnc-1; i++) {
-                size_t prev = (size_t)connc[i];
-                size_t curr = (size_t)connc[i+1];
+                int64_t prev = connc[i];
+                int64_t curr = connc[i+1];
                 double dist = std::abs(nodeCoord[d][curr] - nodeCoord[d][prev]);
                 if (dist>0) {
                     spaceVertices[i] = dist; 

@@ -6,7 +6,7 @@
 #include <vector>
 
 // Select "optimal" grid setup based on node spacing
-void sel_Gridspace(std::vector<double> connc,
+void sel_Gridspace(std::vector<int64_t> connc,
                     std::vector<std::vector<double>> nodeCoord,
                     int n_dims,
                     double perc, /* input <0-1.0> for <0%, 100%>th percentile */
@@ -27,7 +27,7 @@ void GridCellDensity(std::vector<std::vector<double>> nodeCoord,
                     std::vector<size_t> &histGridCell);
 
 
-int check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t &nGridSparse, 
+void check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t &nGridSparse, 
                        std::vector<size_t> &GridSparseMap, std::vector<size_t> &nCluster);
 
 void closest_GridValResi_m(std::vector<size_t> nodeMapGrid,

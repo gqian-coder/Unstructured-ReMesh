@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
         else if (read_status != adios2::StepStatus::OK) {
             break;
         }
-	writer.BeginStep();
+    	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
         
@@ -101,25 +101,25 @@ int main(int argc, char **argv) {
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
-	    var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
+	        var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
                 std::cout << "blockID = " << info.BlockID << "\n";
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
-		std::cout << "total nodes:  " << var_in.size() << "\n";
-		std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+		        std::cout << "total nodes:  " << var_in.size() << "\n";
+		        std::cout << var_in[0] << ", "<< var_in[10] << "\n";
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		if (info.BlockID==2) break;
+		        if (info.BlockID==2) break;
             }
         }
         std::cout << "end\n"; 
         reader.EndStep();
-	writer.EndStep();
+    	writer.EndStep();
     }
     reader.Close();
     writer.Close();

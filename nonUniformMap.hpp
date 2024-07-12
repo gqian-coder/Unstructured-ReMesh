@@ -5,7 +5,11 @@
 #include <cstdint>
 #include <vector>
 
-// Select "optimal" grid setup based on node spacing
+void calc_GridValResi(std::vector<size_t> nodeMapGrid,
+                      std::vector<size_t> nCluster,
+                      std::vector<double> &var_in, /* store the residual value back*/
+                      std::vector<double> &GridPointVal);
+
 void sel_Gridspace(std::vector<int64_t> connc,
                     std::vector<std::vector<double>> nodeCoord,
                     int n_dims,

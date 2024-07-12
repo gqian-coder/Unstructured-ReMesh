@@ -26,3 +26,7 @@ target_link_libraries(mgard_adios_decompress adios2::adios2 MPI::MPI_C mgard::mg
 
 add_executable(MeshGrid MeshGrid.cpp nonUniformMap.cpp)
 target_link_libraries(MeshGrid adios2::adios2 MPI::MPI_C mgard::mgard)
+
+
+add_executable(mgard_adios_remesh mgard_adios_remesh.cpp nonUniformMap.cpp)
+target_link_libraries(mgard_adios_remesh adios2::adios2 MPI::MPI_C mgard::mgard)

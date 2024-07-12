@@ -35,15 +35,59 @@ void check_GridSparsity(std::vector<size_t> nodeMapGrid, size_t nGridPt, size_t 
     double nonZerosRate =  (double)nGridSparse / (double)nGridPt;
     //std::cout << "number of non-zero grid points: " << nGridSparse << " (" << nonZerosRate * 100.0 << "% of Grid pts) \n";
     if (nonZerosRate < threshGrid) {
-	size_t sparseId = 0;
-    	for (size_t i=0; i<nGridPt; i ++) {
+	    size_t sparseId = 0;
+        for (size_t i=0; i<nGridPt; i ++) {
             if (GridPointVal[i]) {
                 GridSparseMap[i] = sparseId;
                 sparseId ++;
             }
-	}
+	    }
     } else {
         nGridSparse = nGridPt; 
+    }
+}
+
+// cell: true|false --> left top corner of the cell | closest grid point
+void closest_Node2UniformGrid(std::vector<size_t> &nodeMapGrid,
+                            std::vector<std::vector<double>> nodeCoord,
+                            std::vector<size_t> resampleRate,
+                            std::vector<double> minvGrid,
+                            std::vector<double> spaceGrid)
+{
+    size_t nNodePt = nodeCoord[0].size();
+    int n_dims = resampleRate.size();
+    double posVal;
+    std::vector<double> index(n_dims);
+    std::vector<size_t> dims(n_dims, 1);
+    for (int d=1; d<n_dims; d++) {
+        dims[d] = dims[d-1] * resampleRate[d-1];
+    }
+    for (size_t i=0; i<nNodePt; i++) {
+        for (int d=0; d<n_dims; d++) {
+            posVal = nodeCoord[d][i] - minvGrid[d];
+            index[d] = std::floor(posVal / spaceGrid[d]);
+            if (index[d]>=resampleRate[d]) index[d] = resampleRate[d]-1;
+            nodeMapGrid[i] += index[d] * dims[d];
+        }
+    }
+}
+
+
+void calc_GridValResi(std::vector<size_t> nodeMapGrid,
+                      std::vector<size_t> nCluster, 
+                      std::vector<double> &var_in, /* store the residual value back*/
+                      std::vector<double> &GridPointVal)
+{
+    size_t nNodePt = var_in.size();
+    size_t nGridPt = GridPointVal.size();
+    for (size_t i=0; i<nNodePt; i++) {
+        GridPointVal[nodeMapGrid[i]] += var_in[i];
+    }
+    for (size_t i=0; i<nGridPt; i++) {
+        GridPointVal[i] = GridPointVal[i] / (double)nCluster[i];
+    }
+    for (size_t i=0; i<nNodePt; i++) {
+        var_in[i] -= GridPointVal[nodeMapGrid[i]];
     }
 }
 
@@ -1194,35 +1238,6 @@ void closest_Node2nonUniformGrid(std::vector<size_t> &nodeMapGrid,
             } 
         }
     }   
-}
-
-
-// cell: true|false --> left top corner of the cell | closest grid point
-void closest_Node2UniformGrid(std::vector<size_t> &nodeMapGrid,
-                            std::vector<std::vector<double>> nodeCoord,
-                            std::vector<size_t> resampleRate,
-                            std::vector<double> minvGrid,
-                            std::vector<double> spaceGrid)
-{
-    size_t nNodePt = nodeCoord[0].size();
-    int n_dims = resampleRate.size();
-    double posVal;
-    std::vector<double> index(n_dims);
-    std::vector<size_t> dims(n_dims, 1);
-    for (int d=1; d<n_dims; d++) {
-        dims[d] = dims[d-1] * resampleRate[d-1];
-    }
-//    size_t maxIndex = 0; 
-    for (size_t i=0; i<nNodePt; i++) {
-        for (int d=0; d<n_dims; d++) {
-            posVal = nodeCoord[d][i] - minvGrid[d];
-            index[d] = std::floor(posVal / spaceGrid[d]);
-            if (index[d]>=resampleRate[d]) index[d] = resampleRate[d]-1;
-            nodeMapGrid[i] += index[d] * dims[d];
-        }
-//        maxIndex = (maxIndex < nodeMapGrid[i]) ? nodeMapGrid[i] : maxIndex;
-    }
-//    std::cout << "maxIndex = " << maxIndex << "\n";
 }
 
 

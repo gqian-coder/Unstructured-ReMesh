@@ -46,15 +46,14 @@ int main(int argc, char **argv) {
     std::vector<double> spaceGrid(n_dims);
     std::vector<double> minvGrid(n_dims);
     std::vector<int64_t> nodeConnc(0);
-    std::vector<std::vector<double>> nodeCoord;
 
     // output variables
     adios2::Variable<size_t> var_map, var_cluster;
-    adios2::Variable<double> var_space;
+    adios2::Variable<size_t> var_gridDim;
     adios2::Variable<char> var_sparse;
     var_map     = writer_io.DefineVariable<size_t>("MeshGridMap", {}, {}, {adios2::UnknownDim});
     var_cluster = writer_io.DefineVariable<size_t>("MeshGridCluster", {}, {}, {adios2::UnknownDim});
-    var_space   = writer_io.DefineVariable<double>("GridCoordSpace", {}, {}, {adios2::UnknownDim});
+    var_gridDim = writer_io.DefineVariable<size_t>("GridDim", {}, {}, {adios2::UnknownDim});
     var_sparse  = writer_io.DefineVariable<char>("GridSparsity", {}, {}, {adios2::UnknownDim});
 
     size_t nNodePt, nSGridPt;
@@ -84,6 +83,7 @@ int main(int argc, char **argv) {
         for (auto &info : bi) {
             std::cout << "blockID = " << info.BlockID << "\n";
             size_t nGridPt = 1;
+            std::vector<std::vector<double>> nodeCoord;
             for (size_t i=0; i<n_dims; i++) {
                 var_coord[i].SetBlockSelection(info.BlockID);
                 std::vector<double> var_in;
@@ -95,11 +95,10 @@ int main(int argc, char **argv) {
             reader.Get<int64_t>(var_connc, nodeConnc, adios2::Mode::Sync);
             reader.PerformGets();
             nNodePt = nodeCoord[0].size();
-            std::cout << "nNodePt = " << nNodePt << "\n";
 
             // calculate the mesh to grid mapping
             sel_Gridspace(nodeConnc, nodeCoord, n_dims, perc, spaceGrid, resampleRate);
-            std::cout << "resample rate: ";
+            std::cout << "resampled grid size: ";
             for (size_t i=0; i<n_dims; i++) {
                 nGridPt = nGridPt * resampleRate[i];
                 std::cout << resampleRate[i];
@@ -145,8 +144,8 @@ int main(int argc, char **argv) {
                 sparsity = 1;
             }
 
-            var_space.SetSelection(adios2::Box<adios2::Dims>({}, {n_dims}));
-            writer.Put<double>(var_space, spaceGrid.data(), adios2::Mode::Sync);
+            var_gridDim.SetSelection(adios2::Box<adios2::Dims>({}, {n_dims}));
+            writer.Put<size_t>(var_gridDim, resampleRate.data(), adios2::Mode::Sync);
             var_sparse.SetSelection(adios2::Box<adios2::Dims>({}, {1}));
             writer.Put<char>(var_sparse, &sparsity, adios2::Mode::Sync);
             writer.PerformPuts(); 
@@ -156,6 +155,8 @@ int main(int argc, char **argv) {
             nodeMapGrid.clear();
             GridSparseMap.clear();
             nCluster.clear();
+            for (size_t i=0; i<n_dims; i++) nodeCoord[i].clear();
+            nodeCoord.clear();
         }
         writer.EndStep();
     	reader.EndStep();

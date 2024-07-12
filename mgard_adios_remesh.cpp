@@ -11,6 +11,7 @@
 #include "nonUniformMap.hpp"
 #include <zstd.h>
 #include <time.h>
+#include <chrono> 
 
 template <typename T>
 void error_calc(T *var_in, T *var_out, size_t data_size, T tolerance)
@@ -85,7 +86,7 @@ int main(int argc, char **argv) {
     size_t ts = 0;
     double minv, maxv;
     double abs_tol, tol_data, tol_resi;
-
+    double time_s = 0.0;
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader_mesh.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -99,6 +100,9 @@ int main(int argc, char **argv) {
         }
         reader.BeginStep(adios2::StepMode::Read, 10.0f);
     	writer.BeginStep();
+
+        auto start = std::chrono::high_resolution_clock::now();
+
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
         // read mesh mapping info
@@ -110,6 +114,7 @@ int main(int argc, char **argv) {
         auto bi = reader_mesh.BlocksInfo(var_map, ts);
         size_t nBlocks = bi.size();
         std::cout << "number of blocks in step " << ts << ": " << nBlocks << "\n";
+
         // set error bounds based on global value range -- across all blocks
         for (int i=0; i<n_vars; i++) {
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
@@ -122,6 +127,7 @@ int main(int argc, char **argv) {
             var_gd[i].AddOperation(op, {{"accuracy", std::to_string(tol_data)}, {"mode", "ABS"}});
             var_rs[i].AddOperation(op, {{"accuracy", std::to_string(tol_resi)}, {"mode", "ABS"}});
         }
+        //auto start = std::chrono::high_resolution_clock::now();
         for (auto &info : bi) {
             std::cout << "blockID = " << info.BlockID << "\n";
             std::vector<size_t> nodeMapGrid, nCluster, resampleRate;
@@ -139,7 +145,7 @@ int main(int argc, char **argv) {
             size_t nNodePt = nodeMapGrid.size();
             size_t nGridPt = nCluster.size();
             std::vector<double> GridPointVal(nGridPt);
-            std::cout << "number of mesh nodes: " << nNodePt << ", number of grid nodes: " << nGridPt << ", sparsity = " << (int)sparsity << "\n";
+            std::cout << "number of mesh nodes: " << nNodePt << ", number of grid nodes: " << nGridPt << "\n";
 
             for (int i=0; i<n_vars; i++) {
                 std::cout << "compress " << var_name[i] << "\n";
@@ -171,8 +177,13 @@ int main(int argc, char **argv) {
             nodeMapGrid.clear();
             nCluster.clear();
             resampleRate.clear();
+
             if (info.BlockID==2) break;
         }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        time_s += (double)duration.count() / 1e6;
+
         std::cout << "end\n"; 
         reader.EndStep();
         reader_mesh.EndStep();
@@ -184,5 +195,6 @@ int main(int argc, char **argv) {
     writer.Close();
 
     MPI_Finalize();
+    std::cout << "total time spent: " << time_s << " sec\n";
     return 0;
 }

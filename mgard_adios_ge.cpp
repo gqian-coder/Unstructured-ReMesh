@@ -10,6 +10,7 @@
 #include "mgard/compress_x.hpp"
 #include <zstd.h>
 #include <time.h>
+#include <chrono>
 
 template <typename T>
 void error_calc(T *var_in, T *var_out, size_t data_size, T tolerance)
@@ -64,6 +65,7 @@ int main(int argc, char **argv) {
     adios2::Engine writer = writer_io.Open(fname + ".compressed", adios2::Mode::Write);
 
     size_t ts = 0;
+    double time_s = 0.0;
     adios2::Variable<int32_t> var_ad2_v2;
     std::vector<int32_t> var_in_v2;
     //size_t compressed_size;
@@ -74,7 +76,7 @@ int main(int argc, char **argv) {
     }
 
     adios2::Operator op = ad.DefineOperator("mgardplus", "mgardplus");
-
+    
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -89,7 +91,7 @@ int main(int argc, char **argv) {
     	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
-        
+        auto start = std::chrono::high_resolution_clock::now(); 
         for (int i=0; i<n_vars; i++) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
@@ -114,9 +116,13 @@ int main(int argc, char **argv) {
                 writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
+
 		        if (info.BlockID==2) break;
             }
         }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        time_s += (double)duration.count() / 1e6;
         std::cout << "end\n"; 
         reader.EndStep();
     	writer.EndStep();
@@ -125,5 +131,7 @@ int main(int argc, char **argv) {
     writer.Close();
 
     MPI_Finalize();
+
+    std::cout << "total time spent: " << time_s << " sec\n";
     return 0;
 }

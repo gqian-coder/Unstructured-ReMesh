@@ -45,14 +45,14 @@ int main(int argc, char **argv) {
     int cnt_argv = 1;
     std::string dpath(argv[cnt_argv++]);
     std::string fname(argv[cnt_argv++]);
-    double s = std::stof(argv[cnt_argv++]);
-    double tol = std::stof(argv[cnt_argv++]);
     int n_vars = std::stoi(argv[cnt_argv++]);
     std::vector<std::string> var_name(n_vars);
     for (int i=0; i< n_vars; i++) {
         var_name[i] = argv[cnt_argv++];
     }
-    
+    double s = std::stof(argv[cnt_argv++]);
+    double tol = std::stof(argv[cnt_argv++]);
+ 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::IO writer_io = ad.DeclareIO("Output");

@@ -11,30 +11,6 @@
 #include <zstd.h>
 #include <time.h>
 
-template <typename T>
-void error_calc(T *var_in, T *var_out, size_t data_size, T tolerance)
-{
-    T diff, norm_data = 0.0, abs_err=0.0, rmse=0.0;
-    T minv = std::numeric_limits<T>::infinity();
-    T maxv = -std::numeric_limits<T>::infinity();
-    for (size_t i=0; i<data_size; i++) {
-        minv       = std::min(minv, var_in[i]);
-        maxv       = std::max(maxv, var_in[i]);
-        norm_data += var_in[i] * var_in[i];
-        diff    = std::abs(var_in[i] - var_out[i]);
-        abs_err = (abs_err < diff) ? diff : abs_err;
-        rmse   += diff*diff;
-    }
-    rmse      = std::sqrt(rmse / data_size);
-    norm_data = std::sqrt(norm_data / data_size);
-
-    std::cout << "Error print out: \n";
-    std::cout << "requested error: ";
-    std::cout << "l2 abs err = " << tolerance << "\n";
-
-    std::cout << "L-inf: " << abs_err << ", relative by data_norm: " << abs_err / norm_data << ", by value range: "<< abs_err / (maxv-minv) << "\n";
-    std::cout << "L2: " << rmse << ", relative by data_norm: " << rmse / norm_data << ", by value range: "<< rmse / (maxv-minv) << "\n";
-}
 
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);

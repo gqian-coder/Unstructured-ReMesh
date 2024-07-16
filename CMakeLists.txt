@@ -32,3 +32,6 @@ target_link_libraries(mgard_adios_remesh adios2::adios2 MPI::MPI_C mgard::mgard)
 
 add_executable(mgard_adios_decompress_remesh mgard_adios_decompress_remesh.cpp nonUniformMap.cpp)
 target_link_libraries(mgard_adios_decompress_remesh adios2::adios2 MPI::MPI_C mgard::mgard)
+
+add_executable(calc_err calc_err.cpp)
+target_link_libraries(calc_err adios2::adios2 MPI::MPI_C mgard::mgard)

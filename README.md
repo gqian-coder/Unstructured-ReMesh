@@ -18,3 +18,6 @@ Error-controlled lossy compression for unstructured data
 
 7. mgard\_adios\_decompress\_remesh: decompress the remsh/interpolation compressed data, using pre-calculated mesh-grid mapping
 ./mgard\_adios\_decompress\_remesh ./ sol\_4114800\_aver.bp.remshCompressed ../../dataset/Mesh2GridMap.bp 3 P\_aver Rho\_aver U\_aver 5  
+
+8. calc\_err: taking two bp files and variable lists, computing the L2 error of the two
+./calc\_err ./ sol\_4114800\_aver.bp sol\_4114800\_aver.bp.remshCompressed.remeshDecompressed 3 P\_aver Rho\_aver U\_aver

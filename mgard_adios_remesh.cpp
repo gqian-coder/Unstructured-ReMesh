@@ -101,8 +101,6 @@ int main(int argc, char **argv) {
         reader.BeginStep(adios2::StepMode::Read, 10.0f);
     	writer.BeginStep();
 
-        auto start = std::chrono::high_resolution_clock::now();
-
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
         // read mesh mapping info
@@ -157,6 +155,7 @@ int main(int argc, char **argv) {
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
 
+                auto start = std::chrono::high_resolution_clock::now();
                 // calculate the residuals and grid interpolation based on the mappings 
                 // store the residual back to var_in
                 calc_GridValResi(nodeMapGrid, nCluster, var_in, GridPointVal);
@@ -172,17 +171,18 @@ int main(int argc, char **argv) {
                 writer.Put<double>(var_gd[i], GridPointVal.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
 
+                auto end = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+                time_s += (double)duration.count() / 1e6;
+
                 var_in.clear();
             }
             nodeMapGrid.clear();
             nCluster.clear();
             resampleRate.clear();
 
-            if (info.BlockID==2) break;
+            if (info.BlockID==5) break;
         }
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        time_s += (double)duration.count() / 1e6;
 
         std::cout << "end\n"; 
         reader.EndStep();

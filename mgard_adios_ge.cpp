@@ -46,13 +46,13 @@ int main(int argc, char **argv) {
     int cnt_argv = 1;
     std::string dpath(argv[cnt_argv++]);
     std::string fname(argv[cnt_argv++]);
-    double tol = std::stof(argv[cnt_argv++]);
     int n_vars = std::stoi(argv[cnt_argv++]);
     std::vector<std::string> var_name(n_vars);
     for (int i=0; i< n_vars; i++) {
         var_name[i] = argv[cnt_argv++];
     }
-    
+    double tol = std::stof(argv[cnt_argv++]);
+ 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::IO writer_io = ad.DeclareIO("Output");
@@ -91,7 +91,6 @@ int main(int argc, char **argv) {
     	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
-        auto start = std::chrono::high_resolution_clock::now(); 
         for (int i=0; i<n_vars; i++) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
@@ -102,7 +101,7 @@ int main(int argc, char **argv) {
             double maxv = var_ad2.Max();
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
-            if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
+            //if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
 	        var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
@@ -112,17 +111,18 @@ int main(int argc, char **argv) {
                 reader.PerformGets();
 		        std::cout << "total nodes:  " << var_in.size() << "\n";
 		        std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+                
+                auto start = std::chrono::high_resolution_clock::now();
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
-                std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-
-		        if (info.BlockID==2) break;
+                auto end = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+                time_s += (double)duration.count() / 1e6;
+                
+		        if (info.BlockID==5) break;
             }
         }
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        time_s += (double)duration.count() / 1e6;
         std::cout << "end\n"; 
         reader.EndStep();
     	writer.EndStep();

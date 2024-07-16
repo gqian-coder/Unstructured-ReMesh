@@ -10,6 +10,7 @@
 #include "mgard/compress_x.hpp"
 #include <zstd.h>
 #include <time.h>
+#include <chrono>
 
 template <typename T>
 void error_calc(T *var_in, T *var_out, size_t data_size, T tolerance)
@@ -45,14 +46,14 @@ int main(int argc, char **argv) {
     int cnt_argv = 1;
     std::string dpath(argv[cnt_argv++]);
     std::string fname(argv[cnt_argv++]);
-    double s = std::stof(argv[cnt_argv++]);
-    double tol = std::stof(argv[cnt_argv++]);
     int n_vars = std::stoi(argv[cnt_argv++]);
     std::vector<std::string> var_name(n_vars);
     for (int i=0; i< n_vars; i++) {
         var_name[i] = argv[cnt_argv++];
     }
-    
+    double s = std::stof(argv[cnt_argv++]);
+    double tol = std::stof(argv[cnt_argv++]);
+ 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::IO writer_io = ad.DeclareIO("Output");
@@ -76,6 +77,7 @@ int main(int argc, char **argv) {
     for (int i=0; i<n_vars; i++) {
     	var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
     }
+    double time_s = 0.0, compress_ts = 0.0;
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -87,7 +89,7 @@ int main(int argc, char **argv) {
         else if (read_status != adios2::StepStatus::OK) {
             break;
         }
-	writer.BeginStep();
+    	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
         
@@ -109,29 +111,37 @@ int main(int argc, char **argv) {
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
                 data_size[i] += var_in.size();
-		std::cout << "total nodes:  " << var_in.size() << "\n";
-		std::cout << var_in[0] << ", "<< var_in[10] << "\n";
-		mgard_x::Config config;
-    		config.lossless = mgard_x::lossless_type::Huffman_Zstd;
-		config.dev_type = mgard_x::device_type::CUDA;
-		config.dev_id   = 2;
-		std::vector<mgard_x::SIZE> shape{var_in.size()};
-		void *compressed_array_cpu = NULL;
-		mgard_x::compress(1, mgard_x::data_type::Double, shape, abs_tol, s,
+    		    std::cout << "total nodes:  " << var_in.size() << "\n";
+	    	    std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+                auto start = std::chrono::high_resolution_clock::now();
+		        mgard_x::Config config;
+  		        config.lossless = mgard_x::lossless_type::Huffman_Zstd;
+		        config.dev_type = mgard_x::device_type::CUDA;
+		        config.dev_id   = 2;
+		        std::vector<mgard_x::SIZE> shape{var_in.size()};
+		        void *compressed_array_cpu = NULL;
+		        mgard_x::compress(1, mgard_x::data_type::Double, shape, abs_tol, s,
                     mgard_x::error_bound_type::ABS, var_in.data(),
                     compressed_array_cpu, compressed_size_step, config, false);
-		void *decompressed_array_cpu = NULL;
-		mgard_x::decompress(compressed_array_cpu, compressed_size_step, 
+		        void *decompressed_array_cpu = NULL;
+		        mgard_x::decompress(compressed_array_cpu, compressed_size_step, 
                      decompressed_array_cpu, config, false);
-		compressed_size[i] += compressed_size_step;
+		        compressed_size[i] += compressed_size_step;
+                auto end = std::chrono::high_resolution_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+                compress_ts += (double)duration.count() / 1e6;
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], (double *)decompressed_array_cpu, adios2::Mode::Sync);
                 writer.PerformPuts();
+
+                end = std::chrono::high_resolution_clock::now();
+                duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+                time_s += (double)duration.count() / 1e6;
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
-		free(compressed_array_cpu);
-		free(decompressed_array_cpu);
-		if (info.BlockID==2) break;
+		        error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
+		        free(compressed_array_cpu);
+		        free(decompressed_array_cpu);
+		        if (info.BlockID==5) break;
             }
         }
         std::cout << "end\n"; 
@@ -146,6 +156,7 @@ int main(int argc, char **argv) {
         MPI_Allreduce(&data_size[i], &lSize[i], 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
         if (rank == 0) {
              printf("%s: compression ratio = %.4f (%ld / %ld)\n", var_name[i].c_str(), ((double)lSize[i]*8) / gb_compressed[i], lSize[i]*8, gb_compressed[i]);
+             std::cout << "total time spent: " << time_s << " sec, compression time = " << compress_ts << "\n";
         }
     }
 

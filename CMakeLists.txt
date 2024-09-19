@@ -6,9 +6,6 @@ find_package(MPI REQUIRED)
 find_package(ADIOS2 REQUIRED PATHS /home/qian/Software/ADIOS2/install-adios/) 
 find_package(mgard REQUIRED)
 
-find_package(CUDAToolkit REQUIRED)
-set (CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr -w")
-
 add_definitions(-DOMPI_SKIP_MPICXX -DMPICH_SKIP_MPICXX)
 set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -Wfatal-errors -Wall -Wextra")
 

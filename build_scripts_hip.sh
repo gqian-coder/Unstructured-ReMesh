@@ -15,8 +15,8 @@ export OMPI_CC=hipcc
 rm build/CMakeCache.txt
 
 cmake -S .  -B ./build\
-            -DCMAKE_PREFIX_PATH="${mgard_install_dir};${adios_install_dir}"\ 
-            -DCMAKE_C_COMPILER=hipcc\
-            -DCMAKE_CXX_COMPILER=hipcc
+            -DCMAKE_PREFIX_PATH="${mgard_install_dir};${adios_install_dir}" 
+            #-DCMAKE_C_COMPILER=hipcc\
+            #-DCMAKE_CXX_COMPILER=hipcc
 
 cmake --build ./build

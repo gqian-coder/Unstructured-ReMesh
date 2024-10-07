@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader      = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine reader_mesh = reader_io_m.Open(dpath + map_name, adios2::Mode::Read);
+    adios2::Engine reader_mesh = reader_io_m.Open(map_name, adios2::Mode::Read);
     adios2::Engine writer = writer_io.Open(fname + ".remshCompressed", adios2::Mode::Write);
 
     adios2::Variable<size_t> var_map, var_cluster, var_gridDim;
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
         var_rs[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i] + "_meshResi", {}, {}, {adios2::UnknownDim});
     }
 
-    adios2::Operator op = ad.DefineOperator("mgardplus", "mgardplus");
+    adios2::Operator op = ad.DefineOperator("mgard", "mgard");
     size_t ts = 0;
     double minv, maxv;
     double abs_tol, tol_data, tol_resi;

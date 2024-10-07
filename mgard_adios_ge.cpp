@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
         var_name[i] = argv[cnt_argv++];
     }
     double tol = std::stof(argv[cnt_argv++]);
+    size_t maxBlocks = (size_t)std::stoi(argv[cnt_argv++]);
  
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
@@ -49,7 +50,7 @@ int main(int argc, char **argv) {
     	var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
     }
 
-    adios2::Operator op = ad.DefineOperator("mgardplus", "mgardplus");
+    adios2::Operator op = ad.DefineOperator("mgard", "mgard");
     
     while (true) {
         // Begin step
@@ -69,22 +70,23 @@ int main(int argc, char **argv) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
             auto bi = reader.BlocksInfo(var_ad2, ts);
-            size_t nBlocks = bi.size();
+            size_t nBlocks = std::min(bi.size(), maxBlocks); 
             std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
             double minv = var_ad2.Min();
             double maxv = var_ad2.Max();
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
-            //if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
+            if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
 	        var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
-            for (auto &info : bi) {
-                var_ad2.SetBlockSelection(info.BlockID);
-                std::cout << "blockID = " << info.BlockID << "\n";
+            size_t blockId = rank;
+            while (blockId < nBlocks) { 
+                var_ad2.SetBlockSelection(blockId);
+                std::cout << "rank " << rank << ", blockID = " << blockId << "\n";
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
 		        std::cout << "total nodes:  " << var_in.size() << "\n";
-		        std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+		        //std::cout << var_in[1000] << ", "<< var_in[10000] << "\n";
                 
                 auto start = std::chrono::high_resolution_clock::now();
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
@@ -93,8 +95,8 @@ int main(int argc, char **argv) {
                 auto end = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
                 time_s += (double)duration.count() / 1e6;
-                
-		        if (info.BlockID==5) break;
+
+                blockId += np_size;    
             }
         }
         std::cout << "end\n"; 

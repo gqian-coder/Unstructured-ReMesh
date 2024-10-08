@@ -13,6 +13,24 @@
 #include <time.h>
 #include <chrono> 
 
+string to_string_ld(long double number) {
+    long double temp = number;
+    long double integerPart = floor(temp);
+    int fractionCounter = 0;
+
+    while (temp - integerPart > 0) {
+        temp = temp * 10;
+        integerPart = floor(temp);
+        fractionCounter++;
+    }
+
+    fractionCounter = std::max(1, fractionCounter);
+
+    std::stringstream stream;
+    stream.precision(fractionCounter);
+    stream << std::fixed << number;
+    return stream.str();
+}
 
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
@@ -98,8 +116,8 @@ int main(int argc, char **argv) {
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
             tol_data = abs_tol * ratio_t;
             tol_resi = abs_tol * (1-ratio_t);
-            var_gd[i].AddOperation(op, {{"accuracy", std::to_string(tol_data)}, {"mode", "ABS"}});
-            var_rs[i].AddOperation(op, {{"accuracy", std::to_string(tol_resi)}, {"mode", "ABS"}});
+            var_gd[i].AddOperation(op, {{"tolerance", to_string_ld(tol_data)}, {"mode", "ABS"}});
+            var_rs[i].AddOperation(op, {{"tolerance", to_string_ld(tol_resi)}, {"mode", "ABS"}});
         }
         //auto start = std::chrono::high_resolution_clock::now();
         for (auto &info : bi) {

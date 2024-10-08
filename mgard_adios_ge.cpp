@@ -12,6 +12,24 @@
 #include <time.h>
 #include <chrono>
 
+string to_string_ld(long double number) {
+    long double temp = number;
+    long double integerPart = floor(temp);
+    int fractionCounter = 0;
+
+    while (temp - integerPart > 0) {
+        temp = temp * 10;
+        integerPart = floor(temp);
+        fractionCounter++;
+    }
+
+    fractionCounter = std::max(1, fractionCounter);
+
+    std::stringstream stream;
+    stream.precision(fractionCounter);
+    stream << std::fixed << number;
+    return stream.str();
+}
 
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
@@ -77,7 +95,7 @@ int main(int argc, char **argv) {
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
-	        var_out[i].AddOperation(op, {{"accuracy", std::to_string(abs_tol)}, {"mode", "ABS"}});
+	        var_out[i].AddOperation(op, {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
             size_t blockId = rank;
             while (blockId < nBlocks) { 
                 var_ad2.SetBlockSelection(blockId);

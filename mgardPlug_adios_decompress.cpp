@@ -48,6 +48,12 @@ int main(int argc, char **argv) {
     	var_out[i] = writer_io.DefineVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
     }
 
+    adios2::Params params;
+    size_t maxBlocks = std::stoi(argv[cnt_argv++]);;
+    if (maxBlocks % np_size) {
+        std::cout << "Error::The total number of blocks must be a multiple of the number of ranks\n";
+        return -1;
+    }
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -67,26 +73,28 @@ int main(int argc, char **argv) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
             auto bi = reader.BlocksInfo(var_ad2, ts);
-            size_t nBlocks = bi.size();
-            std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
+            maxBlocks = (maxBlocks > bi.size()) ? bi.size() : maxBlocks;
+            size_t nBlocks = (size_t) ((double)maxBlocks / (double)np_size);
+            size_t blockId = rank*nBlocks;
+            //std::cout << var_name[i].c_str() << " has " << maxBlocks << " blocks\n";
             //size_t b = 0;//rank;
-            for (auto &info : bi) {
-                var_ad2.SetBlockSelection(info.BlockID);
-                std::cout << "blockID = " << info.BlockID << "\n";
+             while (blockId < (rank+1)*nBlocks) { 
+                var_ad2.SetBlockSelection(blockId);
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
-    	    	std::cout << "total nodes:  " << var_in.size() << "\n";
-	    	    std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+    	    	//std::cout << "total nodes:  " << var_in.size() << "\n";
+	    	    // std::cout << "rank " << rank << ": " << var_in[0] << ", "<< var_in[10] << ", " << var_in[100] << ", " << var_in[1000] << "\n";
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
-                std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
+                //std::cout << "Read block: " << blockId << " size (byte) = " << var_in.size() << std::endl;
+                blockId ++;
             }
         }
         std::cout << "end\n"; 
         reader.EndStep();
-	    writer.EndStep();
+    	writer.EndStep();
     }
     reader.Close();
     writer.Close();

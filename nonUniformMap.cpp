@@ -78,7 +78,7 @@ void calc_GridValResi(std::vector<size_t> nodeMapGrid,
                       std::vector<double> &var_in, /* store the residual value back*/
                       std::vector<double> &GridPointVal)
 {
-    size_t nNodePt = var_in.size();
+    size_t nNodePt = nodeMapGrid.size();
     size_t nGridPt = GridPointVal.size();
     for (size_t i=0; i<nNodePt; i++) {
         GridPointVal[nodeMapGrid[i]] += var_in[i];

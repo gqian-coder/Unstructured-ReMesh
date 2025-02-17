@@ -18,6 +18,12 @@ target_link_libraries(mgard_ge_cpu adios2::adios2 MPI::MPI_C mgard::mgard)
 add_executable(mgard_adios_ge mgard_adios_ge.cpp)
 target_link_libraries(mgard_adios_ge adios2::adios2 MPI::MPI_C mgard::mgard)
 
+add_executable(mgardPlug_adios_ge mgardPlug_adios_ge.cpp)
+target_link_libraries(mgardPlug_adios_ge adios2::adios2 MPI::MPI_C mgard::mgard)
+
+add_executable(mgardPlug_adios_decompress mgardPlug_adios_decompress.cpp)
+target_link_libraries(mgardPlug_adios_decompress adios2::adios2 MPI::MPI_C mgard::mgard)
+
 add_executable(mgard_adios_decompress mgard_adios_decompress.cpp)
 target_link_libraries(mgard_adios_decompress adios2::adios2 MPI::MPI_C mgard::mgard)
 

@@ -47,8 +47,9 @@ int main(int argc, char **argv) {
     for (int i=0; i< n_vars; i++) {
         var_name[i] = argv[cnt_argv++];
     }
-    double tol     = std::stof(argv[cnt_argv++]);
-    double ratio_t = std::stof(argv[cnt_argv++]);
+    double tol       = std::stof(argv[cnt_argv++]);
+    double ratio_t   = std::stof(argv[cnt_argv++]);
+    size_t maxBlocks = std::stof(argv[cnt_argv++]);
 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io   = ad.DeclareIO("Input");
@@ -56,7 +57,7 @@ int main(int argc, char **argv) {
     adios2::IO writer_io   = ad.DeclareIO("Output");
 
     if (rank==0) {
-        std::cout << "write: " << "./" + fname + ".compressed" << "\n";
+        std::cout << "write: " << "./" + fname + ".remshCompressed" << "\n";
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader      = reader_io.Open(dpath + fname, adios2::Mode::Read);
@@ -140,7 +141,7 @@ int main(int argc, char **argv) {
             std::cout << "number of mesh nodes: " << nNodePt << ", number of grid nodes: " << nGridPt << "\n";
 
             for (int i=0; i<n_vars; i++) {
-                std::cout << "compress " << var_name[i] << "\n";
+                std::cout << "compress /hpMusic_base/hpMusic_Zone/FlowSolution/" << var_name[i] << "\n";
                 std::vector<double> var_in;
                 std::fill(GridPointVal.begin(), GridPointVal.end(), 0);
                 var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
@@ -175,7 +176,7 @@ int main(int argc, char **argv) {
             nCluster.clear();
             resampleRate.clear();
 
-            if (info.BlockID==5) break;
+            if (info.BlockID==maxBlocks) break;
         }
 
         std::cout << "end\n"; 

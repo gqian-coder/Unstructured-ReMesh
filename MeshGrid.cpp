@@ -16,6 +16,11 @@
 #include <time.h>
 
 int main(int argc, char **argv) {
+    MPI_Init(&argc, &argv);
+    int rank, np_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &np_size);
+
     // Parse command line arguments
     if (argc < 4) {
         std::cerr << "Usage: " << argv[0] << " dataPath"  << " filedName" ;
@@ -34,6 +39,8 @@ int main(int argc, char **argv) {
     
     double perc = std::stof(argv[cnt_argv++]);
     std::cout << "percentile of grid spacing used for resample rate calculation: " << perc << "\n";
+
+    size_t maxBlocks = (size_t) std::stoi(argv[cnt_argv++]);
 
     adios2::ADIOS ad; 
     adios2::IO reader_io = ad.DeclareIO("Input");
@@ -77,21 +84,24 @@ int main(int argc, char **argv) {
         var_connc = reader_io.InquireVariable<int64_t>("/hpMusic_base/hpMusic_Zone/Elem/ElementConnectivity");
 
         auto bi = reader.BlocksInfo(var_coord[0], 0);  
-        size_t nBlocks = bi.size();
-        std::cout << "data has " << nBlocks << " blocks\n";
         char sparsity;
-        for (auto &info : bi) {
-            std::cout << "blockID = " << info.BlockID << "\n";
+        size_t nBlocks       = std::min(bi.size(), maxBlocks);
+        size_t local_nBlocks = (size_t)std::ceil((double)nBlocks / (double)np_size);
+        size_t blockId       = rank * local_nBlocks;
+        size_t last_Block    = std::min(nBlocks, blockId+local_nBlocks);
+        std::cout << "data has " << nBlocks << " blocks\n";
+        while (blockId < last_Block) {       
+            std::cout << "blockID = " << blockId << "\n";
             size_t nGridPt = 1;
             std::vector<std::vector<double>> nodeCoord;
             for (size_t i=0; i<n_dims; i++) {
-                var_coord[i].SetBlockSelection(info.BlockID);
+                var_coord[i].SetBlockSelection(blockId);
                 std::vector<double> var_in;
                 reader.Get<double>(var_coord[i], var_in, adios2::Mode::Sync);
                 reader.PerformGets();
                 nodeCoord.push_back(var_in);
             }
-            var_connc.SetBlockSelection(info.BlockID);
+            var_connc.SetBlockSelection(blockId);
             reader.Get<int64_t>(var_connc, nodeConnc, adios2::Mode::Sync);
             reader.PerformGets();
             nNodePt = nodeCoord[0].size();
@@ -121,6 +131,7 @@ int main(int argc, char **argv) {
 
             var_map.SetSelection(adios2::Box<adios2::Dims>({}, {nNodePt}));
             if (nSGridPt==nGridPt) {
+                std::cout << "high-dim compression\n";
                 var_cluster.SetSelection(adios2::Box<adios2::Dims>({}, {nGridPt}));
                 writer.Put<size_t>(var_map, nodeMapGrid.data(), adios2::Mode::Sync);
                 writer.Put<size_t>(var_cluster, nCluster.data(), adios2::Mode::Sync);
@@ -150,13 +161,14 @@ int main(int argc, char **argv) {
             writer.Put<char>(var_sparse, &sparsity, adios2::Mode::Sync);
             writer.PerformPuts(); 
             
-            std::cout << "resampled grid size = " << nSGridPt/nNodePt << "X of the original mesh nodes\n";
+            std::cout << "resampled grid size = " << (float)nSGridPt/(float)nNodePt << "X of the original mesh nodes\n";
             // clear the memory for the next block of data
             nodeMapGrid.clear();
             GridSparseMap.clear();
             nCluster.clear();
             for (size_t i=0; i<n_dims; i++) nodeCoord[i].clear();
             nodeCoord.clear();
+            blockId ++;
         }
         writer.EndStep();
     	reader.EndStep();

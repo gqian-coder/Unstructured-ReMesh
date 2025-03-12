@@ -98,26 +98,26 @@ int main(int argc, char **argv) {
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
                 std::cout << "blockID = " << info.BlockID << "\n";
-		double minv = var_ad2.Min();
-	        double maxv = var_ad2.Max();
-		double abs_tol = tol * (maxv-minv);
+		        double minv = var_ad2.Min();
+	            double maxv = var_ad2.Max();
+		        double abs_tol = tol * (maxv-minv);
                 std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
                 data_size[i] += var_in.size();
-		std::cout << "total nodes:  " << var_in.size() << "\n";
+		        std::cout << "total nodes:  " << var_in.size() << "\n";
                 const mgard::TensorMeshHierarchy<1, double> hierarchy({var_in.size()});
                 const mgard::CompressedDataset<1, double> compressed = mgard::compress(hierarchy, var_in.data(), s, abs_tol);
                 const mgard::DecompressedDataset<1, double> decompressed = mgard::decompress(compressed);
-		std::cout << var_in[0] << ", "<< var_in[10] << "\n";
+		        std::cout << var_in[0] << ", "<< var_in[10] << "\n";
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], decompressed.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
                 compressed_size[i] += compressed.size();
                 std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		error_calc(var_in.data(), (double *)decompressed.data(), var_in.size(), abs_tol);
-                if (info.BlockID==2) break;
+		        //error_calc(var_in.data(), (double *)decompressed.data(), var_in.size(), abs_tol);
+                //if (info.BlockID==2) break;
             }
         }
         std::cout << "end\n"; 

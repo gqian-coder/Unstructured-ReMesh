@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".compressed", adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open(fname + ".compressed.REL_"+ to_string_ld(tol), adios2::Mode::Write);
 
     size_t ts = 0;
     double time_s = 0.0;
@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
-	        var_out[i].AddOperation(op, {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
+	        var_out[i].AddOperation(op, {{"tolerance", to_string_ld(abs_tol)}, {"mode", "REL"}});
             size_t blockId = rank;
             while (blockId < nBlocks) { 
                 var_ad2.SetBlockSelection(blockId);

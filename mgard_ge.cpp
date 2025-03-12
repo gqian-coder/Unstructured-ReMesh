@@ -54,16 +54,18 @@ int main(int argc, char **argv) {
     double s = std::stof(argv[cnt_argv++]);
     double tol = std::stof(argv[cnt_argv++]);
  
+    size_t maxBlocks = (size_t)std::stoi(argv[cnt_argv++]);
+
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::IO writer_io = ad.DeclareIO("Output");
 
     if (rank==0) {
-        std::cout << "write: " << "./" + fname + ".mgard" << "\n";
+        std::cout << "write: " << "./" + fname + ".mgardRct" << "\n";
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".mgard", adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open(fname + ".mgardRct", adios2::Mode::Write);
 
     size_t compressed_size_step = 0;
     std::vector<size_t> compressed_size(n_vars, 0);
@@ -97,7 +99,7 @@ int main(int argc, char **argv) {
             adios2::Variable<double> var_ad2;
             var_ad2 = reader_io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/FlowSolution/"+var_name[i]);
             auto bi = reader.BlocksInfo(var_ad2, ts);
-            size_t nBlocks = bi.size();
+            size_t nBlocks = std::min(bi.size(), maxBlocks); 
             std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
             double minv = var_ad2.Min();
             double maxv = var_ad2.Max();
@@ -106,19 +108,21 @@ int main(int argc, char **argv) {
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
             for (auto &info : bi) {
                 var_ad2.SetBlockSelection(info.BlockID);
-                std::cout << "blockID = " << info.BlockID << "\n";
                 std::vector<double> var_in; 
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
                 data_size[i] += var_in.size();
+                std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
     		    std::cout << "total nodes:  " << var_in.size() << "\n";
 	    	    std::cout << var_in[0] << ", "<< var_in[10] << "\n";
                 auto start = std::chrono::high_resolution_clock::now();
 		        mgard_x::Config config;
   		        config.lossless = mgard_x::lossless_type::Huffman_Zstd;
-		        config.dev_type = mgard_x::device_type::CUDA;
-		        config.dev_id   = 2;
-		        std::vector<mgard_x::SIZE> shape{var_in.size()};
+		        config.dev_type = mgard_x::device_type::SERIAL;//mgard_x::device_type::CUDA;
+		        //config.dev_id   = 2;
+                size_t data_cnt = var_in.size();//2424818;
+
+		        std::vector<mgard_x::SIZE> shape{data_cnt};//var_in.size()};
 		        void *compressed_array_cpu = NULL;
 		        mgard_x::compress(1, mgard_x::data_type::Double, shape, abs_tol, s,
                     mgard_x::error_bound_type::ABS, var_in.data(),
@@ -130,18 +134,17 @@ int main(int argc, char **argv) {
                 auto end = std::chrono::high_resolution_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
                 compress_ts += (double)duration.count() / 1e6;
-                var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
+                var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {data_cnt/*var_in.size()*/}));
                 writer.Put<double>(var_out[i], (double *)decompressed_array_cpu, adios2::Mode::Sync);
                 writer.PerformPuts();
 
                 end = std::chrono::high_resolution_clock::now();
                 duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
                 time_s += (double)duration.count() / 1e6;
-                std::cout << "Read block: " << info.BlockID << " size (byte) = " << var_in.size() << std::endl;
-		        error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
+		        //error_calc(var_in.data(), (double *)decompressed_array_cpu, var_in.size(), abs_tol);
 		        free(compressed_array_cpu);
 		        free(decompressed_array_cpu);
-		        if (info.BlockID==5) break;
+		        if (info.BlockID==nBlocks) break;
             }
         }
         std::cout << "end\n"; 

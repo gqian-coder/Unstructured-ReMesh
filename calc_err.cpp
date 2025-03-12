@@ -22,6 +22,7 @@ void error_calc(T *var_in, T *var_out, size_t data_size, T minv, T maxv)
         abs_err = (abs_err < diff) ? diff : abs_err;
         rmse   += diff*diff;
     }
+    std::cout << "data size: " << data_size << "\n";
     rmse      = std::sqrt(rmse / data_size);
     norm_data = std::sqrt(norm_data / data_size);
 
@@ -44,6 +45,7 @@ int main(int argc, char **argv) {
     for (int i=0; i< n_vars; i++) {
         var_name[i] = argv[cnt_argv++];
     }
+    size_t maxBlocks = std::stoi(argv[cnt_argv++]);
 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io_1 = ad.DeclareIO("Input1");
@@ -98,10 +100,12 @@ int main(int argc, char **argv) {
                 reader_1.PerformGets();
                 reader_2.Get(var_ad2, var_in_2, adios2::Mode::Sync);
                 reader_2.PerformGets();
+                std::cout << "read data\n";
 
                 error_calc(var_in_1.data(), var_in_2.data(), var_in_1.size(), minv, maxv);
                 var_in_1.clear();
                 var_in_2.clear();
+                if (info.BlockID==maxBlocks) break;
             }
         }
         ts ++;

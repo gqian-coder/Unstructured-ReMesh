@@ -9,6 +9,7 @@
 #include <thread>
 #include <chrono>
 #include <dirent.h>
+#include <algorithm>
 
 #include "adios2.h"
 #include <zstd.h>
@@ -46,7 +47,7 @@ int main(int argc, char **argv) {
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
     adios2::IO writer_io = ad.DeclareIO("Output");
-    adios2::Engine writer = writer_io.Open("Mesh2GridMap.bp", adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open("Mesh2GridMap_"+fname, adios2::Mode::Write);
 
     std::vector<adios2::Variable<double>> var_coord(n_dims);
     adios2::Variable<int64_t> var_connc;
@@ -172,6 +173,7 @@ int main(int argc, char **argv) {
         }
         writer.EndStep();
     	reader.EndStep();
+        break;
     }
     reader.Close();
     writer.Close();

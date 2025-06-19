@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.19)
 project(mgard_standard)
 
 find_package(MPI REQUIRED)
-find_package(ADIOS2 REQUIRED PATHS /home/qian/Software/ADIOS2/install-adios/) 
+find_package(ADIOS2 REQUIRED) 
 find_package(mgard REQUIRED)
 
 add_definitions(-DOMPI_SKIP_MPICXX -DMPICH_SKIP_MPICXX)
@@ -28,7 +28,7 @@ add_executable(mgard_adios_decompress mgard_adios_decompress.cpp)
 target_link_libraries(mgard_adios_decompress adios2::adios2 MPI::MPI_C mgard::mgard)
 
 add_executable(MeshGrid MeshGrid.cpp nonUniformMap.cpp)
-target_link_libraries(MeshGrid adios2::adios2 MPI::MPI_C mgard::mgard)
+target_link_libraries(MeshGrid adios2::adios2 MPI::MPI_C)
 
 add_executable(mgard_adios_remesh mgard_adios_remesh.cpp nonUniformMap.cpp)
 target_link_libraries(mgard_adios_remesh adios2::adios2 MPI::MPI_C mgard::mgard)

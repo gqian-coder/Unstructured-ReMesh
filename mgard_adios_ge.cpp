@@ -47,6 +47,8 @@ int main(int argc, char **argv) {
     }
     double tol = std::stof(argv[cnt_argv++]);
     size_t maxBlocks = (size_t)std::stoi(argv[cnt_argv++]);
+
+    int target_step = std::stoi(argv[cnt_argv++]);
  
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
@@ -57,9 +59,8 @@ int main(int argc, char **argv) {
         std::cout << "readin: " << dpath + fname << "\n";
     }
     adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".compressed.REL_"+ to_string_ld(tol), adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open(fname + ".compressed", adios2::Mode::Write);
 
-    size_t ts = 0;
     double time_s = 0.0;
     //size_t compressed_size;
   
@@ -69,7 +70,8 @@ int main(int argc, char **argv) {
     }
 
     adios2::Operator op = ad.DefineOperator("mgard", "mgard");
-    
+
+    int ts = 0;    
     while (true) {
         // Begin step
         adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
@@ -81,6 +83,7 @@ int main(int argc, char **argv) {
         else if (read_status != adios2::StepStatus::OK) {
             break;
         }
+        if (ts==target_step) { // only read target step
     	writer.BeginStep();
         size_t step = reader.CurrentStep();
         if (rank==0) std::cout << "Process step " << step << ": " << std::endl;
@@ -94,8 +97,9 @@ int main(int argc, char **argv) {
             double maxv = var_ad2.Max();
             //size_t b = 0;//rank;
             double abs_tol = tol * (maxv-minv);
+            std::cout << tol / (maxv-minv) <<"\n";
             if (rank==0) std::cout << var_name[i].c_str() << ": min/max = "<< minv << "/" << maxv << ", tol = "<< abs_tol << std::endl;
-	        var_out[i].AddOperation(op, {{"tolerance", to_string_ld(abs_tol)}, {"mode", "REL"}});
+            var_out[i].AddOperation(op, {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});            
             size_t blockId = rank;
             while (blockId < nBlocks) { 
                 var_ad2.SetBlockSelection(blockId);
@@ -118,8 +122,10 @@ int main(int argc, char **argv) {
             }
         }
         std::cout << "end\n"; 
+        writer.EndStep();
+        } // only read target step
+        ts ++;
         reader.EndStep();
-    	writer.EndStep();
     }
     reader.Close();
     writer.Close();

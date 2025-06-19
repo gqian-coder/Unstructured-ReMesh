@@ -184,6 +184,7 @@ int main(int argc, char **argv) {
         reader_mesh.EndStep();
     	writer.EndStep();
         ts ++;
+        break;
     }
     reader.Close();
     reader_mesh.Close();

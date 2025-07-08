@@ -108,20 +108,23 @@ int main(int argc, char **argv)
     adios2::IO map_io = ad.DeclareIO("InputMap");
     adios2::Engine mapreader = map_io.Open("Mesh2GridMap.bp", adios2::Mode::ReadRandomAccess);
 
-    adios2::Variable<uint64_t> vinGridDim = map_io.InquireVariable<uint64_t>("GridDim");
-    adios2::Variable<char> vinGridSparsity = map_io.InquireVariable<char>("GridSparsity");
+    adios2::Variable<uint64_t> vinGridDim =
+        map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/GridDim");
+    adios2::Variable<char> vinGridSparsity =
+        map_io.InquireVariable<char>("__mesh_grid_mapping__/GridSparsity");
     adios2::Variable<uint64_t> vinMeshGridCluster =
-        map_io.InquireVariable<uint64_t>("MeshGridCluster");
-    adios2::Variable<uint64_t> vinMeshGridMap = map_io.InquireVariable<uint64_t>("MeshGridMap");
+        map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/MeshGridCluster");
+    adios2::Variable<uint64_t> vinMeshGridMap =
+        map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/MeshGridMap");
 
-    adios2::Variable<uint64_t> voutGridDim =
-        writer_io.DefineVariable<uint64_t>("GridDim", {}, {}, {adios2::UnknownDim});
-    adios2::Variable<char> voutGridSparsity =
-        writer_io.DefineVariable<char>("GridSparsity", {}, {}, {adios2::UnknownDim});
-    adios2::Variable<uint64_t> voutMeshGridCluster =
-        writer_io.DefineVariable<uint64_t>("MeshGridCluster", {}, {}, {adios2::UnknownDim});
-    adios2::Variable<uint64_t> voutMeshGridMap =
-        writer_io.DefineVariable<uint64_t>("MeshGridMap", {}, {}, {adios2::UnknownDim});
+    adios2::Variable<uint64_t> voutGridDim = writer_io.DefineVariable<uint64_t>(
+        "__mesh_grid_mapping__/GridDim", {}, {}, {adios2::UnknownDim});
+    adios2::Variable<char> voutGridSparsity = writer_io.DefineVariable<char>(
+        "__mesh_grid_mapping__/GridSparsity", {}, {}, {adios2::UnknownDim});
+    adios2::Variable<uint64_t> voutMeshGridCluster = writer_io.DefineVariable<uint64_t>(
+        "__mesh_grid_mapping__/MeshGridCluster", {}, {}, {adios2::UnknownDim});
+    adios2::Variable<uint64_t> voutMeshGridMap = writer_io.DefineVariable<uint64_t>(
+        "__mesh_grid_mapping__/MeshGridMap", {}, {}, {adios2::UnknownDim});
     writer.BeginStep();
     for (int bid = blockId; bid < rankBlock_num; bid++)
     {

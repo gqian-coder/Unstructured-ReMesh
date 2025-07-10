@@ -18,6 +18,7 @@
 
 const char *FLOWPREFIX = "/hpMusic_base/hpMusic_Zone/FlowSolution/";
 int rank, np_size;
+MPI_Comm comm;
 
 string to_string_ld(long double number)
 {
@@ -40,9 +41,10 @@ string to_string_ld(long double number)
     return stream.str();
 }
 
-void GetVarsAndBlocks(adios2::ADIOS &ad, std::string &inputFileName, const char *prefix,
+void GetVarsAndBlocks(std::string &inputFileName, const char *prefix,
                       std::vector<std::string> &varNames, size_t *nBlocks)
 {
+    adios2::ADIOS ad(comm);
     adios2::IO io = ad.DeclareIO("InputOnce");
     io.SetParameter("SelectSteps", "0");
     auto e = io.Open(inputFileName, adios2::Mode::ReadRandomAccess);
@@ -88,9 +90,8 @@ adios2::Variable<T> InquireVariable(adios2::IO &io, adios2::Engine &engine, cons
     return var;
 }
 
-void CopyMesh(adios2::ADIOS &ad, adios2::Engine &reader, adios2::IO &reader_io,
-              adios2::Engine &writer, adios2::IO &writer_io, int blockId, int rankBlock_num,
-              Timers *timers)
+void CopyMesh(adios2::Engine &reader, adios2::IO &reader_io, adios2::Engine &writer,
+              adios2::IO &writer_io, int blockId, int rankBlock_num, Timers *timers)
 {
     if (rank == 0)
         std::cout << "    Copy mesh in first step " << std::endl;
@@ -221,21 +222,35 @@ void CopyMesh(adios2::ADIOS &ad, adios2::Engine &reader, adios2::IO &reader_io,
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &np_size);
+    comm = MPI_COMM_WORLD;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &np_size);
+
+    if (argc < 5)
+    {
+        std::cerr << "Usage: " << argv[0] << "  input  mapfile  output  tolerance\n"
+                  << "  input     :  sol or sol_aver BP file\n"
+                  << "  mapping   :  mesh to grid mapping file (MeshGrid output)\n"
+                  << "  output    :  compressed data file \n"
+                  << "  tolerance :  floating point accuracy value, relative error in data"
+                  << std::endl;
+        return EXIT_FAILURE;
+    }
 
     int cnt_argv = 1;
     std::string inputPath(argv[cnt_argv++]);
+    std::string mapPath(argv[cnt_argv++]);
     std::string outputPath(argv[cnt_argv++]);
     double tol = std::stof(argv[cnt_argv++]);
 
-    adios2::ADIOS ad(MPI_COMM_WORLD);
+    adios2::ADIOS ad(comm);
     adios2::IO reader_io = ad.DeclareIO("Input");
     adios2::IO writer_io = ad.DeclareIO("Output");
 
     if (rank == 0)
     {
         std::cout << "read : " << inputPath << "\n";
+        std::cout << "       " << mapPath << "\n";
         std::cout << "write: " << outputPath << "\n";
     }
 
@@ -243,7 +258,7 @@ int main(int argc, char **argv)
 
     size_t maxBlocks;
     std::vector<std::string> var_name;
-    GetVarsAndBlocks(ad, inputPath, FLOWPREFIX, var_name, &maxBlocks);
+    GetVarsAndBlocks(inputPath, FLOWPREFIX, var_name, &maxBlocks);
     int n_vars = var_name.size();
 
     if (rank == 0)
@@ -275,7 +290,7 @@ int main(int argc, char **argv)
     adios2::Params params;
     params["PluginName"] = "mgardReMesh";
     params["PluginLibrary"] = "CompressMGARDMeshToGridOperator";
-    params["meshfile"] = "Mesh2GridMap.bp";
+    params["meshfile"] = mapPath;
     params["ebratio"] = "0.7";
     params["mode"] = "ABS";
 
@@ -289,7 +304,7 @@ int main(int argc, char **argv)
        First, copy the Mesh to Grid Mapping into the output file as part of the first output step
     *****/
     adios2::IO map_io = ad.DeclareIO("InputMap");
-    adios2::Engine mapreader = map_io.Open("Mesh2GridMap.bp", adios2::Mode::ReadRandomAccess);
+    adios2::Engine mapreader = map_io.Open(mapPath, adios2::Mode::ReadRandomAccess);
 
     adios2::Variable<uint64_t> vinGridDim =
         map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/GridDim");
@@ -360,7 +375,7 @@ int main(int argc, char **argv)
         else
         {
             /* In first step only, copy the mesh variables*/
-            CopyMesh(ad, reader, reader_io, writer, writer_io, blockId, rankBlock_num, &timers);
+            CopyMesh(reader, reader_io, writer, writer_io, blockId, rankBlock_num, &timers);
         }
 
         for (int i = 0; i < n_vars; i++)
@@ -412,8 +427,7 @@ int main(int argc, char **argv)
         Timings
     */
     std::vector<Timers> tv(np_size);
-    MPI_Gather(&timers, sizeof(Timers), MPI_CHAR, tv.data(), sizeof(Timers), MPI_CHAR, 0,
-               MPI_COMM_WORLD);
+    MPI_Gather(&timers, sizeof(Timers), MPI_CHAR, tv.data(), sizeof(Timers), MPI_CHAR, 0, comm);
 
     if (!rank)
     {

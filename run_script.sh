@@ -5,7 +5,7 @@ export LD_LIBRARY_PATH
 BINDIR=/home/adios/shared/Software/CompressMGARDMeshToGridOperator/Unstructured-ReMesh/build
 
 # generate mesh
-$BINDIR/MeshGrid ./sol sol_4169000_aver.bp 3 0.15 96
+$BINDIR/MeshGrid sol/sol_4169000_aver.bp map.bp 0.15
 
 # mgardPlug
 $BINDIR/mgardPlug_adios_ge sol/sol_4169000_aver.bp sol/sol_compressed.bp 1e-4

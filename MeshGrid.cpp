@@ -12,41 +12,83 @@
 #include <time.h>
 #include <zstd.h>
 
+int rank, np_size;
+MPI_Comm comm;
+
+void ReadInfo(std::string &inputFileName, size_t *ndim, size_t *nblocks)
+{
+    adios2::ADIOS ad(comm);
+    adios2::IO io = ad.DeclareIO("InputOnce");
+    io.SetParameter("SelectSteps", "0");
+    auto e = io.Open(inputFileName, adios2::Mode::ReadRandomAccess);
+    auto var = io.InquireVariable<int32_t>("/hpMusic_base/physdim");
+    if (!var)
+    {
+        throw std::invalid_argument("The input file " + inputFileName +
+                                    " does not have a variable int32_t /hpMusic_base/physdim");
+    }
+    int32_t idim;
+    e.Get(var, &idim, adios2::Mode::Sync);
+    *ndim = (size_t)idim;
+
+    auto varX =
+        io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/GridCoordinates/CoordinateX");
+    if (!varX)
+    {
+        throw std::invalid_argument("The input file " + inputFileName +
+                                    " does not have a variable double "
+                                    "/hpMusic_base/hpMusic_Zone/GridCoordinates/CoordinateX");
+    }
+    auto bi = e.BlocksInfo(varX, 0);
+    *nblocks = bi.size();
+    e.Close();
+}
+
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
-    int rank, np_size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &np_size);
+    comm = MPI_COMM_WORLD;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &np_size);
 
     // Parse command line arguments
     if (argc < 4)
     {
-        std::cerr << "Usage: " << argv[0] << " dataPath"
-                  << " filedName";
-        std::cerr << " n-Dims ";
-        std::cerr << " percentile of node spacing for grid selection" << std::endl;
+        std::cerr << "Usage: " << argv[0] << "  input  output  percentile\n"
+                  << "  input     :  sol or sol_aver BP file with mesh in it\n"
+                  << "  output    :  mesh to grid mapping file \n"
+                  << "  percentile: of node spacing for grid selection" << std::endl;
         return EXIT_FAILURE;
     }
     int cnt_argv = 1;
-    std::string dpath(argv[cnt_argv++]);
-    std::string fname(argv[cnt_argv++]);
-    std::cout << "Read in : " << dpath + fname << "\n";
+    std::string solFile(argv[cnt_argv++]);
+    std::string mappingFile(argv[cnt_argv++]);
+    double perc = std::stof(argv[cnt_argv++]);
 
-    // dimensions used for compression
-    size_t n_dims = (size_t)std::stoi(argv[cnt_argv++]);
+    if (!rank)
+    {
+        std::cout << "Read in : " << solFile << "\n";
+        std::cout << "Write   : " << mappingFile << "\n";
+        std::cout << "percentile of grid spacing used for resample rate calculation: " << perc
+                  << "\n";
+    }
+
+    size_t maxBlocks;
+    size_t n_dims;
+    ReadInfo(solFile, &n_dims, &maxBlocks);
+    if (!rank)
+    {
+        std::cout << "ndim    : " << n_dims << "\n";
+        std::cout << "nblocks : " << maxBlocks << "\n";
+    }
+
     std::vector<size_t> resampleRate(n_dims, 1);
 
-    double perc = std::stof(argv[cnt_argv++]);
-    std::cout << "percentile of grid spacing used for resample rate calculation: " << perc << "\n";
-
-    size_t maxBlocks = (size_t)std::stoi(argv[cnt_argv++]);
-
-    adios2::ADIOS ad;
+    adios2::ADIOS ad(comm);
     adios2::IO reader_io = ad.DeclareIO("Input");
-    adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
+    adios2::Engine reader = reader_io.Open(solFile, adios2::Mode::Read);
     adios2::IO writer_io = ad.DeclareIO("Output");
-    adios2::Engine writer = writer_io.Open("Mesh2GridMap_" + fname, adios2::Mode::Write);
+    adios2::Engine writer = writer_io.Open(mappingFile, adios2::Mode::Write);
 
     std::vector<adios2::Variable<double>> var_coord(n_dims);
     adios2::Variable<int64_t> var_connc;

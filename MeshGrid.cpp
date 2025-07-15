@@ -99,15 +99,15 @@ int main(int argc, char **argv)
     // output variables
     adios2::Variable<size_t> var_map, var_cluster;
     adios2::Variable<size_t> var_gridDim;
-    adios2::Variable<char> var_sparse;
+    adios2::Variable<uint8_t> var_sparse;
     var_map = writer_io.DefineVariable<size_t>("__mesh_grid_mapping__/MeshGridMap", {}, {},
                                                {adios2::UnknownDim});
     var_cluster = writer_io.DefineVariable<size_t>("__mesh_grid_mapping__/MeshGridCluster", {}, {},
                                                    {adios2::UnknownDim});
     var_gridDim = writer_io.DefineVariable<size_t>("__mesh_grid_mapping__/GridDim", {}, {},
                                                    {adios2::UnknownDim});
-    var_sparse = writer_io.DefineVariable<char>("__mesh_grid_mapping__/GridSparsity", {}, {},
-                                                {adios2::UnknownDim});
+    var_sparse = writer_io.DefineVariable<uint8_t>("__mesh_grid_mapping__/GridSparsity", {}, {},
+                                                   {adios2::UnknownDim});
 
     size_t nNodePt, nSGridPt;
     while (true)
@@ -136,7 +136,7 @@ int main(int argc, char **argv)
             "/hpMusic_base/hpMusic_Zone/Elem/ElementConnectivity");
 
         auto bi = reader.BlocksInfo(var_coord[0], 0);
-        char sparsity;
+        uint8_t sparsity;
         size_t nBlocks = std::min(bi.size(), maxBlocks);
         size_t local_nBlocks = (size_t)std::ceil((double)nBlocks / (double)np_size);
         size_t blockId = rank * local_nBlocks;
@@ -222,7 +222,7 @@ int main(int argc, char **argv)
             var_gridDim.SetSelection(adios2::Box<adios2::Dims>({}, {n_dims}));
             writer.Put<size_t>(var_gridDim, resampleRate.data(), adios2::Mode::Sync);
             var_sparse.SetSelection(adios2::Box<adios2::Dims>({}, {1}));
-            writer.Put<char>(var_sparse, &sparsity, adios2::Mode::Sync);
+            writer.Put<uint8_t>(var_sparse, &sparsity, adios2::Mode::Sync);
             writer.PerformPuts();
 
             std::cout << "resampled grid size = " << (float)nSGridPt / (float)nNodePt
@@ -243,5 +243,6 @@ int main(int argc, char **argv)
     reader.Close();
     writer.Close();
 
+    MPI_Finalize();
     return 0;
 }

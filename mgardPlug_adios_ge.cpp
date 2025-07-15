@@ -308,8 +308,8 @@ int main(int argc, char **argv)
 
     adios2::Variable<uint64_t> vinGridDim =
         map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/GridDim");
-    adios2::Variable<char> vinGridSparsity =
-        map_io.InquireVariable<char>("__mesh_grid_mapping__/GridSparsity");
+    adios2::Variable<uint8_t> vinGridSparsity =
+        map_io.InquireVariable<uint8_t>("__mesh_grid_mapping__/GridSparsity");
     adios2::Variable<uint64_t> vinMeshGridCluster =
         map_io.InquireVariable<uint64_t>("__mesh_grid_mapping__/MeshGridCluster");
     adios2::Variable<uint64_t> vinMeshGridMap =
@@ -317,7 +317,7 @@ int main(int argc, char **argv)
 
     adios2::Variable<uint64_t> voutGridDim = writer_io.DefineVariable<uint64_t>(
         "__mesh_grid_mapping__/GridDim", {}, {}, {adios2::UnknownDim});
-    adios2::Variable<char> voutGridSparsity = writer_io.DefineVariable<char>(
+    adios2::Variable<uint8_t> voutGridSparsity = writer_io.DefineVariable<uint8_t>(
         "__mesh_grid_mapping__/GridSparsity", {}, {}, {adios2::UnknownDim});
     adios2::Variable<uint64_t> voutMeshGridCluster = writer_io.DefineVariable<uint64_t>(
         "__mesh_grid_mapping__/MeshGridCluster", {}, {}, {adios2::UnknownDim});
@@ -327,7 +327,7 @@ int main(int argc, char **argv)
     for (int bid = blockId; bid < rankBlock_num; bid++)
     {
         std::vector<uint64_t> gridDim;
-        std::vector<char> gridSparsity;
+        std::vector<uint8_t> gridSparsity;
         std::vector<uint64_t> meshGridCluster;
         std::vector<uint64_t> meshGridMap;
         vinGridDim.SetBlockSelection(bid);

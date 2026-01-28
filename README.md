@@ -1,12 +1,22 @@
 Error-controlled lossy compression for unstructured data  
 
-1. mgard\_adios\_ge.cpp: read data through ADIOS, compressing through MGARD-GPU, then writing the results out. The compression was conducted during the ADIOS write, as an operator
+1. mgard\_adios\_ge.cpp: read data through ADIOS, compressing through MGARD-GPU, then writing the results out. The compression was conducted during the ADIOS write, as an operator. Automatically detects all variables containing "FlowSolution" in their name.
    
-./mgard\_adios\_ge ../../dataset/ sol\_4114800\_aver.bp 3 P\_aver Rho\_aver U\_aver 0.001
+```bash
+# Usage: mgard_adios_ge input.bp output.bp error_bound [n_blocks]
+./mgard_adios_ge input.bp output_compressed.bp 0.001
 
-2. mgard\_adios\_decompress.cpp: read the compressed data through ADIOS, decompressing the data through MGARD-GPU, as an operator
+# With optional n_blocks parameter (process only first N blocks)
+./mgard_adios_ge input.bp output_compressed.bp 0.001 10
+```
+
+2. mgard\_adios\_decompress.cpp: read the compressed data through ADIOS, decompressing the data through MGARD-GPU, as an operator. Automatically detects all variables and blocks in the compressed file.
    
-./mgard\_adios\_decompress ./ sol\_4114800\_aver.bp.compressed 3 P\_aver Rho\_aver U\_aver
+```bash
+# Usage: mgard_adios_decompress compressed_input.bp
+./mgard_adios_decompress output_compressed.bp
+# Output will be: output_compressed.decompressed.bp
+```
 
 3. MeshGrid: generating the mesh-to-grid mapping, saving it as a separate file for latter usage
    

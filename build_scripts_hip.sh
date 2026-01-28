@@ -12,7 +12,7 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export GPU_TARGET=gfx908
 export OMPI_CC=hipcc
 
-rm build/CMakeCache.txt
+#rm build/CMakeCache.txt
 
 cmake -S .  -B ./build\
             -DCMAKE_PREFIX_PATH="${mgard_install_dir};${adios_install_dir}" 

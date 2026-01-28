@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -13,7 +14,7 @@
 #include <time.h>
 #include <zstd.h>
 
-string to_string_ld(long double number)
+std::string to_string_ld(long double number)
 {
     long double temp = number;
     long double integerPart = floor(temp);
@@ -41,19 +42,24 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &np_size);
 
-    int cnt_argv = 1;
-    std::string dpath(argv[cnt_argv++]);
-    std::string fname(argv[cnt_argv++]);
-    int n_vars = std::stoi(argv[cnt_argv++]);
-    std::vector<std::string> var_name(n_vars);
-    for (int i = 0; i < n_vars; i++)
+    if (argc < 4 || argc > 5)
     {
-        var_name[i] = argv[cnt_argv++];
+        if (rank == 0)
+        {
+            std::cerr << "Usage: " << argv[0] << " input.bp output.bp error_bound [n_blocks]\n";
+            std::cerr << "  input.bp    - Input BP file\n";
+            std::cerr << "  output.bp   - Output BP file with compressed variables\n";
+            std::cerr << "  error_bound - Relative error bound for compression\n";
+            std::cerr << "  n_blocks    - (Optional) Maximum number of blocks to process\n";
+        }
+        MPI_Finalize();
+        return 1;
     }
-    double tol = std::stof(argv[cnt_argv++]);
-    size_t maxBlocks = (size_t)std::stoi(argv[cnt_argv++]);
 
-    int target_step = std::stoi(argv[cnt_argv++]);
+    std::string input_file(argv[1]);
+    std::string output_file(argv[2]);
+    double tol = std::stod(argv[3]);
+    size_t maxBlocks = (argc == 5) ? (size_t)std::stoi(argv[4]) : SIZE_MAX;
 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
@@ -61,91 +67,148 @@ int main(int argc, char **argv)
 
     if (rank == 0)
     {
-        std::cout << "write: "
-                  << "./" + fname + ".compressed.mgard"
-                  << "\n";
-        std::cout << "readin: " << dpath + fname << "\n";
+        std::cout << "Input file:  " << input_file << "\n";
+        std::cout << "Output file: " << output_file << "\n";
+        std::cout << "Error bound: " << tol << "\n";
+        if (maxBlocks != SIZE_MAX)
+            std::cout << "Max blocks:  " << maxBlocks << "\n";
+        else
+            std::cout << "Max blocks:  all\n";
     }
-    adios2::Engine reader = reader_io.Open(dpath + fname, adios2::Mode::Read);
-    adios2::Engine writer = writer_io.Open(fname + ".compressed.mgard", adios2::Mode::Write);
+    adios2::Engine reader = reader_io.Open(input_file, adios2::Mode::Read);
 
-    double time_s = 0.0;
-    // size_t compressed_size;
+    // Need to begin a step first to discover variables in BP files
+    adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
+    if (read_status != adios2::StepStatus::OK)
+    {
+        if (rank == 0)
+            std::cerr << "Failed to read first step from input file.\n";
+        reader.Close();
+        MPI_Finalize();
+        return 1;
+    }
 
+    // Auto-detect variables containing "FlowSolution" in their name
+    std::map<std::string, adios2::Params> available_vars = reader_io.AvailableVariables();
+    std::vector<std::string> var_name;
+    for (const auto &var_pair : available_vars)
+    {
+        const std::string &name = var_pair.first;
+        if (name.find("FlowSolution") != std::string::npos)
+        {
+            // Check if the variable is of type double
+            auto it = var_pair.second.find("Type");
+            if (it != var_pair.second.end() && it->second == "double")
+            {
+                var_name.push_back(name);
+            }
+        }
+    }
+
+    int n_vars = var_name.size();
+    if (rank == 0)
+    {
+        std::cout << "Found " << n_vars << " FlowSolution variables:\n";
+        for (const auto &name : var_name)
+        {
+            std::cout << "  - " << name << "\n";
+        }
+    }
+
+    if (n_vars == 0)
+    {
+        if (rank == 0)
+        {
+            std::cerr << "No FlowSolution variables found in the input file.\n";
+        }
+        reader.EndStep();
+        reader.Close();
+        MPI_Finalize();
+        return 1;
+    }
+
+    adios2::Engine writer = writer_io.Open(output_file, adios2::Mode::Write);
+
+    size_t total_size_bytes = 0;  // Track total size of compressed data
+
+    // Define output variables
     std::vector<adios2::Variable<double>> var_out(n_vars);
     for (int i = 0; i < n_vars; i++)
     {
         var_out[i] = writer_io.DefineVariable<double>(
-            "/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i], {}, {}, {adios2::UnknownDim});
+            var_name[i], {}, {}, {adios2::UnknownDim});
     }
 
     adios2::Operator op = ad.DefineOperator("mgard", "mgard");
 
     int ts = 0;
+    bool first_step = true;  // We already called BeginStep for variable discovery
     while (true)
     {
-        // Begin step
-        adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
-        if (read_status == adios2::StepStatus::NotReady)
+        // Begin step (skip for first iteration since we already did it)
+        if (!first_step)
         {
-            // std::cout << "Stream not ready yet. Waiting...\n";
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            continue;
-        }
-        else if (read_status != adios2::StepStatus::OK)
-        {
-            break;
-        }
-        if (ts == target_step)
-        { // only read target step
-            writer.BeginStep();
-            size_t step = reader.CurrentStep();
-            if (rank == 0)
-                std::cout << "Process step " << step << ": " << std::endl;
-            for (int i = 0; i < n_vars; i++)
+            adios2::StepStatus read_status = reader.BeginStep(adios2::StepMode::Read, 10.0f);
+            if (read_status == adios2::StepStatus::NotReady)
             {
-                adios2::Variable<double> var_ad2;
-                var_ad2 = reader_io.InquireVariable<double>(
-                    "/hpMusic_base/hpMusic_Zone/FlowSolution/" + var_name[i]);
-                auto bi = reader.BlocksInfo(var_ad2, ts);
-                size_t nBlocks = std::min(bi.size(), maxBlocks);
-                std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
-                double minv = var_ad2.Min();
-                double maxv = var_ad2.Max();
-                // size_t b = 0;//rank;
-                double abs_tol = tol * (maxv - minv);
-                std::cout << tol / (maxv - minv) << "\n";
-                if (rank == 0)
-                    std::cout << var_name[i].c_str() << ": min/max = " << minv << "/" << maxv
-                              << ", tol = " << abs_tol << std::endl;
-                var_out[i].AddOperation(op,
-                                        {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
-                size_t blockId = rank;
-                while (blockId < nBlocks)
-                {
-                    var_ad2.SetBlockSelection(blockId);
-                    std::cout << "rank " << rank << ", blockID = " << blockId << "\n";
-                    std::vector<double> var_in;
-                    reader.Get(var_ad2, var_in, adios2::Mode::Sync);
-                    reader.PerformGets();
-                    std::cout << "total nodes:  " << var_in.size() << "\n";
-                    // std::cout << var_in[1000] << ", "<< var_in[10000] << "\n";
-
-                    auto start = std::chrono::high_resolution_clock::now();
-                    var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
-                    writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
-                    writer.PerformPuts();
-                    auto end = std::chrono::high_resolution_clock::now();
-                    auto duration =
-                        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-                    time_s += (double)duration.count() / 1e6;
-
-                    blockId += np_size;
-                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                continue;
             }
-            std::cout << "end\n";
-            writer.EndStep();
-        } // only read target step
+            else if (read_status != adios2::StepStatus::OK)
+            {
+                break;
+            }
+        }
+        first_step = false;
+
+        // Process all steps
+        writer.BeginStep();
+        size_t step = reader.CurrentStep();
+        if (rank == 0)
+            std::cout << "Process step " << step << ": " << std::endl;
+        for (int i = 0; i < n_vars; i++)
+        {
+            adios2::Variable<double> var_ad2;
+            var_ad2 = reader_io.InquireVariable<double>(var_name[i]);
+            auto bi = reader.BlocksInfo(var_ad2, ts);
+            size_t nBlocks = std::min(bi.size(), maxBlocks);
+            if (rank == 0)
+                std::cout << var_name[i].c_str() << " has " << bi.size() << " blocks, processing " << nBlocks << " blocks\n";
+            double minv = var_ad2.Min();
+            double maxv = var_ad2.Max();
+            double abs_tol = tol * (maxv - minv);
+            if (rank == 0)
+                std::cout << var_name[i].c_str() << ": min/max = " << minv << "/" << maxv
+                          << ", tol = " << abs_tol << std::endl;
+            var_out[i].AddOperation(op,
+                                    {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
+            size_t blockId = rank;
+            while (blockId < nBlocks)
+            {
+                var_ad2.SetBlockSelection(blockId);
+                if (rank == 0)
+                    std::cout << "rank " << rank << ", blockID = " << blockId << "\n";
+                std::vector<double> var_in;
+                reader.Get(var_ad2, var_in, adios2::Mode::Sync);
+                reader.PerformGets();
+                // Only print total nodes for the first variable
+                if (rank == 0 && i == 0)
+                    std::cout << "total nodes:  " << var_in.size() << "\n";
+                
+                // Accumulate total size
+                total_size_bytes += var_in.size() * sizeof(double);
+
+                var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
+                writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
+                writer.PerformPuts();
+
+                blockId += np_size;
+            }
+        }
+        if (rank == 0)
+            std::cout << "end step " << ts << "\n";
+        writer.EndStep();
+
         ts++;
         reader.EndStep();
     }
@@ -154,6 +217,14 @@ int main(int argc, char **argv)
 
     MPI_Finalize();
 
-    std::cout << "total time spent: " << time_s << " sec\n";
+    if (rank == 0)
+    {
+        double total_size_gb = total_size_bytes / (1024.0 * 1024.0 * 1024.0);
+        double total_size_mb = total_size_bytes / (1024.0 * 1024.0);
+        if (total_size_gb >= 1.0)
+            std::cout << "Total data compressed:  " << total_size_gb << " GB\n";
+        else
+            std::cout << "Total data compressed:  " << total_size_mb << " MB\n";
+    }
     return 0;
 }

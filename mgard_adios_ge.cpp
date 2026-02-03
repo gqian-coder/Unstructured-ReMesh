@@ -141,6 +141,21 @@ int main(int argc, char **argv)
 
     adios2::Operator op = ad.DefineOperator("mgard", "mgard");
 
+    // Add operation to output variables once (before the timestep loop)
+    // We need to compute tolerance based on min/max from the first step
+    for (int i = 0; i < n_vars; i++)
+    {
+        adios2::Variable<double> var_ad2 = reader_io.InquireVariable<double>(var_name[i]);
+        double minv = var_ad2.Min();
+        double maxv = var_ad2.Max();
+        double abs_tol = tol * (maxv - minv);
+        if (rank == 0)
+            std::cout << var_name[i].c_str() << ": min/max = " << minv << "/" << maxv
+                      << ", abs_tol = " << abs_tol << std::endl;
+        var_out[i].AddOperation(op,
+                                {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
+    }
+
     int ts = 0;
     bool first_step = true;  // We already called BeginStep for variable discovery
     while (true)
@@ -174,14 +189,6 @@ int main(int argc, char **argv)
             size_t nBlocks = std::min(bi.size(), maxBlocks);
             if (rank == 0)
                 std::cout << var_name[i].c_str() << " has " << bi.size() << " blocks, processing " << nBlocks << " blocks\n";
-            double minv = var_ad2.Min();
-            double maxv = var_ad2.Max();
-            double abs_tol = tol * (maxv - minv);
-            if (rank == 0)
-                std::cout << var_name[i].c_str() << ": min/max = " << minv << "/" << maxv
-                          << ", tol = " << abs_tol << std::endl;
-            var_out[i].AddOperation(op,
-                                    {{"tolerance", to_string_ld(abs_tol)}, {"mode", "ABS"}});
             size_t blockId = rank;
             while (blockId < nBlocks)
             {

@@ -19,25 +19,35 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &np_size);
 
-    if (argc != 2)
+    if (argc < 2 || argc > 3)
     {
         if (rank == 0)
         {
-            std::cerr << "Usage: " << argv[0] << " compressed_input.bp\n";
-            std::cerr << "  compressed_input.bp - Compressed BP file to decompress\n";
+            std::cerr << "Usage: " << argv[0] << " compressed_input.bp [decompressed_output.bp]\n";
+            std::cerr << "  compressed_input.bp    - Compressed BP file to decompress\n";
+            std::cerr << "  decompressed_output.bp - (Optional) Output filename\n";
+            std::cerr << "\nAutomatically decompresses all variables matching '*FlowSolution*'\n";
         }
         MPI_Finalize();
         return 1;
     }
 
     std::string input_file(argv[1]);
-    // Generate output filename by replacing .bp with .decompressed.bp or appending .decompressed
     std::string output_file;
-    size_t bp_pos = input_file.rfind(".bp");
-    if (bp_pos != std::string::npos && bp_pos == input_file.length() - 3)
-        output_file = input_file.substr(0, bp_pos) + ".decompressed.bp";
+    
+    if (argc == 3)
+    {
+        output_file = argv[2];
+    }
     else
-        output_file = input_file + ".decompressed";
+    {
+        // Generate output filename by replacing .bp with _decompressed.bp or appending _decompressed
+        size_t bp_pos = input_file.rfind(".bp");
+        if (bp_pos != std::string::npos && bp_pos == input_file.length() - 3)
+            output_file = input_file.substr(0, bp_pos) + "_decompressed.bp";
+        else
+            output_file = input_file + "_decompressed";
+    }
 
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("Input");
@@ -61,27 +71,34 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Auto-detect all double variables in the file
+    // Auto-detect all variables matching *FlowSolution* pattern
     std::map<std::string, adios2::Params> available_vars = reader_io.AvailableVariables();
     std::vector<std::string> var_name;
+    std::vector<std::string> var_type;  // Store type for each variable
     for (const auto &var_pair : available_vars)
     {
         const std::string &name = var_pair.first;
-        // Check if the variable is of type double
-        auto it = var_pair.second.find("Type");
-        if (it != var_pair.second.end() && it->second == "double")
+        // Check if the variable name contains "FlowSolution"
+        if (name.find("FlowSolution") != std::string::npos)
         {
-            var_name.push_back(name);
+            // Accept both double and float types
+            auto it = var_pair.second.find("Type");
+            if (it != var_pair.second.end() && 
+                (it->second == "double" || it->second == "float"))
+            {
+                var_name.push_back(name);
+                var_type.push_back(it->second);
+            }
         }
     }
 
     int n_vars = var_name.size();
     if (rank == 0)
     {
-        std::cout << "Found " << n_vars << " variables to decompress:\n";
-        for (const auto &name : var_name)
+        std::cout << "Found " << n_vars << " FlowSolution variables to decompress:\n";
+        for (int i = 0; i < n_vars; i++)
         {
-            std::cout << "  - " << name << "\n";
+            std::cout << "  - " << var_name[i] << " (" << var_type[i] << ")\n";
         }
     }
 
@@ -89,7 +106,7 @@ int main(int argc, char **argv) {
     {
         if (rank == 0)
         {
-            std::cerr << "No variables found in the input file.\n";
+            std::cerr << "No FlowSolution variables found in the input file.\n";
         }
         reader.EndStep();
         reader.Close();
@@ -101,11 +118,15 @@ int main(int argc, char **argv) {
 
     size_t total_size_bytes = 0;  // Track total size of decompressed data
 
-    // Define output variables
-    std::vector<adios2::Variable<double>> var_out(n_vars);
+    // Define output variables (matching input types)
+    std::vector<adios2::Variable<double>> var_out_double(n_vars);
+    std::vector<adios2::Variable<float>> var_out_float(n_vars);
     for (int i = 0; i < n_vars; i++)
     {
-        var_out[i] = writer_io.DefineVariable<double>(var_name[i], {}, {}, {adios2::UnknownDim});
+        if (var_type[i] == "double")
+            var_out_double[i] = writer_io.DefineVariable<double>(var_name[i], {}, {}, {adios2::UnknownDim});
+        else
+            var_out_float[i] = writer_io.DefineVariable<float>(var_name[i], {}, {}, {adios2::UnknownDim});
     }
 
     int ts = 0;
@@ -135,39 +156,59 @@ int main(int argc, char **argv) {
 
         for (int i = 0; i < n_vars; i++)
         {
-            adios2::Variable<double> var_ad2;
-            var_ad2 = reader_io.InquireVariable<double>(var_name[i]);
-            auto bi = reader.BlocksInfo(var_ad2, ts);
-            size_t nBlocks = bi.size();
-            if (rank == 0)
-                std::cout << var_name[i].c_str() << " has " << nBlocks << " blocks\n";
-
-            size_t blockId = rank;
-            while (blockId < nBlocks)
+            if (var_type[i] == "double")
             {
-                var_ad2.SetBlockSelection(blockId);
+                adios2::Variable<double> var_ad2 = reader_io.InquireVariable<double>(var_name[i]);
+                auto bi = reader.BlocksInfo(var_ad2, ts);
+                size_t nBlocks = bi.size();
                 if (rank == 0)
-                    std::cout << "rank " << rank << ", blockID = " << blockId << "\n";
-                std::vector<double> var_in;
-                reader.Get(var_ad2, var_in, adios2::Mode::Sync);
-                reader.PerformGets();
+                    std::cout << "  " << var_name[i].c_str() << ": " << nBlocks << " blocks\n";
 
-                // Only print total nodes for the first variable
-                if (rank == 0 && i == 0)
-                    std::cout << "total nodes:  " << var_in.size() << "\n";
+                size_t blockId = rank;
+                while (blockId < nBlocks)
+                {
+                    var_ad2.SetBlockSelection(blockId);
+                    std::vector<double> var_in;
+                    reader.Get(var_ad2, var_in, adios2::Mode::Sync);
+                    reader.PerformGets();
 
-                // Accumulate total size
-                total_size_bytes += var_in.size() * sizeof(double);
+                    total_size_bytes += var_in.size() * sizeof(double);
 
-                var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
-                writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
-                writer.PerformPuts();
+                    var_out_double[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
+                    writer.Put<double>(var_out_double[i], var_in.data(), adios2::Mode::Sync);
+                    writer.PerformPuts();
 
-                blockId += np_size;
+                    blockId += np_size;
+                }
+            }
+            else  // float
+            {
+                adios2::Variable<float> var_ad2 = reader_io.InquireVariable<float>(var_name[i]);
+                auto bi = reader.BlocksInfo(var_ad2, ts);
+                size_t nBlocks = bi.size();
+                if (rank == 0)
+                    std::cout << "  " << var_name[i].c_str() << ": " << nBlocks << " blocks\n";
+
+                size_t blockId = rank;
+                while (blockId < nBlocks)
+                {
+                    var_ad2.SetBlockSelection(blockId);
+                    std::vector<float> var_in;
+                    reader.Get(var_ad2, var_in, adios2::Mode::Sync);
+                    reader.PerformGets();
+
+                    total_size_bytes += var_in.size() * sizeof(float);
+
+                    var_out_float[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
+                    writer.Put<float>(var_out_float[i], var_in.data(), adios2::Mode::Sync);
+                    writer.PerformPuts();
+
+                    blockId += np_size;
+                }
             }
         }
         if (rank == 0)
-            std::cout << "end step " << ts << "\n";
+            std::cout << "Completed step " << ts << "\n";
         reader.EndStep();
         writer.EndStep();
         ts++;
@@ -181,10 +222,14 @@ int main(int argc, char **argv) {
     {
         double total_size_gb = total_size_bytes / (1024.0 * 1024.0 * 1024.0);
         double total_size_mb = total_size_bytes / (1024.0 * 1024.0);
+        std::cout << "\nDecompression complete.\n";
+        std::cout << "  Steps processed: " << ts << "\n";
+        std::cout << "  Variables: " << n_vars << "\n";
         if (total_size_gb >= 1.0)
-            std::cout << "Total data decompressed: " << total_size_gb << " GB\n";
+            std::cout << "  Total data: " << total_size_gb << " GB\n";
         else
-            std::cout << "Total data decompressed: " << total_size_mb << " MB\n";
+            std::cout << "  Total data: " << total_size_mb << " MB\n";
+        std::cout << "  Output: " << output_file << "\n";
     }
     return 0;
 }

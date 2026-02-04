@@ -10,12 +10,15 @@ Error-controlled lossy compression for unstructured data
 ./mgard_adios_ge input.bp output_compressed.bp 0.001 10
 ```
 
-2. mgard\_adios\_decompress.cpp: read the compressed data through ADIOS, decompressing the data through MGARD-GPU, as an operator. Automatically detects all variables and blocks in the compressed file.
+2. mgard\_adios\_decompress.cpp: read the compressed data through ADIOS, decompressing the data through MGARD-GPU, as an operator. Automatically detects all FlowSolution variables and processes all timesteps and blocks.
    
 ```bash
-# Usage: mgard_adios_decompress compressed_input.bp
+# Usage: mgard_adios_decompress compressed_input.bp [decompressed_output.bp]
 ./mgard_adios_decompress output_compressed.bp
-# Output will be: output_compressed.decompressed.bp
+# Output will be: output_compressed_decompressed.bp
+
+# Or specify output filename:
+./mgard_adios_decompress output_compressed.bp my_decompressed.bp
 ```
 
 3. MeshGrid: generating the mesh-to-grid mapping, saving it as a separate file for latter usage
@@ -38,9 +41,12 @@ Error-controlled lossy compression for unstructured data
    
 ./mgard\_adios\_decompress\_remesh ./ sol\_4114800\_aver.bp.remshCompressed ../../dataset/Mesh2GridMap.bp 3 P\_aver Rho\_aver U\_aver 5  
 
-8. calc\_err: taking two bp files and variable lists, computing the L2 error of the two
+8. calc\_err: compare two bp files and compute errors (L-inf and RMSE) for all FlowSolution variables. Automatically detects all FlowSolution variables and processes all timesteps and blocks.
    
-./calc\_err ./ sol\_4114800\_aver.bp sol\_4114800\_aver.bp.remshCompressed.remeshDecompressed 3 P\_aver Rho\_aver U\_aver
+```bash
+# Usage: calc_err original_file.bp compressed_file.bp
+./calc_err sol_original.bp sol_decompressed.bp
+```
 
 9. mgardPlug\_adios\_ge: compressing data using interpolation-based approach, using the pre-calculated mesh-grid mapping; conducted through adios plug operator
     

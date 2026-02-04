@@ -17,6 +17,10 @@ $BINDIR/mgard_adios_ge /lustre/orion/proj-shared/cfd164/norbert_vki_case_frontie
 # with optional n_blocks parameter (e.g., process only first 10 blocks)
 # $BINDIR/mgard_adios_ge /lustre/orion/proj-shared/cfd164/norbert_vki_case_frontier/p1/sol/sol_4169000_aver.bp sol_compressed.bp 1e-4 10
 
-# decompress - new interface: auto-detects all variables and blocks
-# Usage: mgard_adios_decompress compressed_input.bp
-$BINDIR/mgard_adios_decompress sol_compressed.bp
+# decompress - new interface: auto-detects FlowSolution variables, processes all steps and blocks
+# Usage: mgard_adios_decompress compressed_input.bp [output.bp]
+$BINDIR/mgard_adios_decompress sol_compressed.bp sol_decompressed.bp
+
+# calculate error between original and decompressed
+# Usage: calc_err original_file.bp compressed_file.bp
+$BINDIR/calc_err /lustre/orion/proj-shared/cfd164/norbert_vki_case_frontier/p1/sol/sol_4169000_aver.bp sol_decompressed.bp

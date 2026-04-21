@@ -164,8 +164,11 @@ int main(int argc, char **argv) {
                 if (rank == 0)
                     std::cout << "  " << var_name[i].c_str() << ": " << nBlocks << " blocks\n";
 
-                size_t blockId = rank;
-                while (blockId < nBlocks)
+                // Contiguous block distribution to preserve block ordering in output
+                size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
+                size_t startBlock = rank * blocksPerRank;
+                size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
+                for (size_t blockId = startBlock; blockId < endBlock; blockId++)
                 {
                     var_ad2.SetBlockSelection(blockId);
                     std::vector<double> var_in;
@@ -177,8 +180,6 @@ int main(int argc, char **argv) {
                     var_out_double[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                     writer.Put<double>(var_out_double[i], var_in.data(), adios2::Mode::Sync);
                     writer.PerformPuts();
-
-                    blockId += np_size;
                 }
             }
             else  // float
@@ -189,8 +190,11 @@ int main(int argc, char **argv) {
                 if (rank == 0)
                     std::cout << "  " << var_name[i].c_str() << ": " << nBlocks << " blocks\n";
 
-                size_t blockId = rank;
-                while (blockId < nBlocks)
+                // Contiguous block distribution to preserve block ordering in output
+                size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
+                size_t startBlock = rank * blocksPerRank;
+                size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
+                for (size_t blockId = startBlock; blockId < endBlock; blockId++)
                 {
                     var_ad2.SetBlockSelection(blockId);
                     std::vector<float> var_in;
@@ -202,8 +206,6 @@ int main(int argc, char **argv) {
                     var_out_float[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                     writer.Put<float>(var_out_float[i], var_in.data(), adios2::Mode::Sync);
                     writer.PerformPuts();
-
-                    blockId += np_size;
                 }
             }
         }

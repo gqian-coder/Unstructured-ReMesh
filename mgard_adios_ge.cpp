@@ -189,18 +189,16 @@ int main(int argc, char **argv)
             size_t nBlocks = std::min(bi.size(), maxBlocks);
             if (rank == 0)
                 std::cout << var_name[i].c_str() << " has " << bi.size() << " blocks, processing " << nBlocks << " blocks\n";
-            size_t blockId = rank;
-            while (blockId < nBlocks)
+            // Contiguous block distribution to preserve block ordering in output
+            size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
+            size_t startBlock = rank * blocksPerRank;
+            size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
+            for (size_t blockId = startBlock; blockId < endBlock; blockId++)
             {
                 var_ad2.SetBlockSelection(blockId);
-                if (rank == 0)
-                    std::cout << "rank " << rank << ", blockID = " << blockId << "\n";
                 std::vector<double> var_in;
                 reader.Get(var_ad2, var_in, adios2::Mode::Sync);
                 reader.PerformGets();
-                // Only print total nodes for the first variable
-                if (rank == 0 && i == 0)
-                    std::cout << "total nodes:  " << var_in.size() << "\n";
                 
                 // Accumulate total size
                 total_size_bytes += var_in.size() * sizeof(double);
@@ -208,8 +206,6 @@ int main(int argc, char **argv)
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
                 writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
                 writer.PerformPuts();
-
-                blockId += np_size;
             }
         }
         if (rank == 0)

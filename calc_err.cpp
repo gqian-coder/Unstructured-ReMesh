@@ -188,8 +188,11 @@ int main(int argc, char **argv) {
                     std::cout << var_name[i] << " (" << nBlocks << " blocks, range: [" 
                               << minv << ", " << maxv << "])\n";
 
-                size_t blockId = rank;
-                while (blockId < nBlocks) {
+                // Contiguous block distribution to preserve block ordering
+                size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
+                size_t startBlock = rank * blocksPerRank;
+                size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
+                for (size_t blockId = startBlock; blockId < endBlock; blockId++) {
                     var_ad1.SetBlockSelection(blockId);
                     var_ad2.SetBlockSelection(blockId);
                     
@@ -215,8 +218,6 @@ int main(int argc, char **argv) {
                         var_total_rmse[i] += rmse;
                         var_total_count[i] += var_in_1.size();
                     }
-                    
-                    blockId += np_size;
                 }
             } else {  // float
                 adios2::Variable<float> var_ad1 = reader_io_1.InquireVariable<float>(var_name[i]);
@@ -238,8 +239,11 @@ int main(int argc, char **argv) {
                     std::cout << var_name[i] << " (" << nBlocks << " blocks, range: [" 
                               << minv << ", " << maxv << "])\n";
 
-                size_t blockId = rank;
-                while (blockId < nBlocks) {
+                // Contiguous block distribution to preserve block ordering
+                size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
+                size_t startBlock = rank * blocksPerRank;
+                size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
+                for (size_t blockId = startBlock; blockId < endBlock; blockId++) {
                     var_ad1.SetBlockSelection(blockId);
                     var_ad2.SetBlockSelection(blockId);
                     
@@ -259,8 +263,6 @@ int main(int argc, char **argv) {
                     var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
                     var_total_rmse[i] += rmse;
                     var_total_count[i] += var_in_1.size();
-                    
-                    blockId += np_size;
                 }
             }
         }

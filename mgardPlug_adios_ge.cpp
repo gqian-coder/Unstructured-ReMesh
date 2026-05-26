@@ -293,7 +293,7 @@ int main(int argc, char **argv)
     params["meshfile"] = mapPath;
     params["ebratio"] = "0.7";
     params["mode"] = "ABS";
-    params["residual_method"]="huffman_zstd";
+    params["residual_method"]="huffman";
 
     std::cout << "rank " << rank << " will read in blocks " << blockId << ".." << rankBlock_num - 1
               << "\n";
@@ -326,7 +326,7 @@ int main(int argc, char **argv)
         "__mesh_grid_mapping__/MeshGridMap", {}, {}, {adios2::UnknownDim});
 
     writer.BeginStep();
-    
+   /*  
     for (int bid = blockId; bid < rankBlock_num; bid++)
     {
         std::vector<uint64_t> gridDim;
@@ -351,7 +351,7 @@ int main(int argc, char **argv)
         writer.Put(voutMeshGridCluster, meshGridCluster.data(), adios2::Mode::Sync);
         writer.Put(voutMeshGridMap, meshGridMap.data(), adios2::Mode::Sync);
     }
-    
+   */ 
     int ts = 0;
     while (true)
     {
@@ -378,7 +378,7 @@ int main(int argc, char **argv)
         else
         {
             /* In first step only, copy the mesh variables*/
-            CopyMesh(reader, reader_io, writer, writer_io, blockId, rankBlock_num, &timers);
+        //    CopyMesh(reader, reader_io, writer, writer_io, blockId, rankBlock_num, &timers);
         }
 
         for (int i = 0; i < n_vars; i++)

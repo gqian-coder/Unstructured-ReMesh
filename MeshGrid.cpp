@@ -15,29 +15,21 @@
 int rank, np_size;
 MPI_Comm comm;
 
-void ReadInfo(std::string &inputFileName, size_t *ndim, size_t *nblocks)
+void ReadInfo(std::string &inputFileName, size_t *nblocks,
+              std::string& block_path)
 {
     adios2::ADIOS ad(comm);
     adios2::IO io = ad.DeclareIO("InputOnce");
     io.SetParameter("SelectSteps", "0");
     auto e = io.Open(inputFileName, adios2::Mode::ReadRandomAccess);
-    auto var = io.InquireVariable<int32_t>("/hpMusic_base/physdim");
-    if (!var)
-    {
-        throw std::invalid_argument("The input file " + inputFileName +
-                                    " does not have a variable int32_t /hpMusic_base/physdim");
-    }
-    int32_t idim;
-    e.Get(var, &idim, adios2::Mode::Sync);
-    *ndim = (size_t)idim;
 
-    auto varX =
-        io.InquireVariable<double>("/hpMusic_base/hpMusic_Zone/GridCoordinates/CoordinateX");
+    std::string temp = block_path + "GridCoordinates/CoordinateX";
+    auto varX = io.InquireVariable<double>(temp.c_str());
     if (!varX)
     {
         throw std::invalid_argument("The input file " + inputFileName +
-                                    " does not have a variable double "
-                                    "/hpMusic_base/hpMusic_Zone/GridCoordinates/CoordinateX");
+                                    " does not have a variable double " + block_path +
+                                    "GridCoordinates/CoordinateX");
     }
     auto bi = e.BlocksInfo(varX, 0);
     *nblocks = bi.size();
@@ -55,15 +47,24 @@ int main(int argc, char **argv)
     if (argc < 4)
     {
         std::cerr << "Usage: " << argv[0] << "  input  output  percentile\n"
-                  << "  input     :  sol or sol_aver BP file with mesh in it\n"
-                  << "  output    :  mesh to grid mapping file \n"
-                  << "  percentile: of node spacing for grid selection" << std::endl;
+                  << "  input      :  sol or sol_aver BP file with mesh in it\n"
+                  << "  output     :  mesh to grid mapping file \n"
+                  << "  percentile : of node spacing for grid selection\n"
+                  << "  block path :  [OPTIONAL] 'volume' (default) or boundary name (e.g. 'INLET', 'AF') to compress\n";
         return EXIT_FAILURE;
     }
     int cnt_argv = 1;
     std::string solFile(argv[cnt_argv++]);
     std::string mappingFile(argv[cnt_argv++]);
     double perc = std::stof(argv[cnt_argv++]);
+    std::string block_path = "/volume/";
+    if (argc == 5)
+    {
+      std::cerr << "working on block\n";
+      std::string temp = argv[cnt_argv++];
+      block_path = "/" + temp  + "/";
+    }
+    std::cerr << argc << " it the args\n";
 
     if (!rank)
     {
@@ -71,11 +72,12 @@ int main(int argc, char **argv)
         std::cout << "Write   : " << mappingFile << "\n";
         std::cout << "percentile of grid spacing used for resample rate calculation: " << perc
                   << "\n";
+        std::cout << "block path : " << block_path << "\n";
     }
 
     size_t maxBlocks;
-    size_t n_dims;
-    ReadInfo(solFile, &n_dims, &maxBlocks);
+    size_t n_dims = 3;
+    ReadInfo(solFile, &maxBlocks, block_path);
     if (!rank)
     {
         std::cout << "ndim    : " << n_dims << "\n";
@@ -129,11 +131,12 @@ int main(int argc, char **argv)
         std::vector<std::string> coordVarName{"CoordinateZ", "CoordinateX", "CoordinateY"};
         for (size_t i = 0; i < n_dims; i++)
         {
-            var_coord[i] = reader_io.InquireVariable<double>(
-                "/hpMusic_base/hpMusic_Zone/GridCoordinates/" + coordVarName[i]);
+          std::string temp = block_path + "GridCoordinates/" + coordVarName[i];
+          std::cerr << temp << std::endl;
+          var_coord[i] = reader_io.InquireVariable<double>(temp.c_str());
         }
-        var_connc = reader_io.InquireVariable<int64_t>(
-            "/hpMusic_base/hpMusic_Zone/Elem/ElementConnectivity");
+        std::string temp = block_path + "Elem/ElementConnectivity";
+        var_connc = reader_io.InquireVariable<int64_t>(temp.c_str());
 
         auto bi = reader.BlocksInfo(var_coord[0], 0);
         uint8_t sparsity;

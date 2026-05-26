@@ -98,16 +98,22 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Auto-detect all variables matching *FlowSolution* pattern
-    std::map<std::string, adios2::Params> available_vars = reader_io_1.AvailableVariables();
+    // Build variable list from the COMPRESSED file, then verify each exists
+    // in the original.  This avoids iterating over the many FlowSolution
+    // variables in the original that were not compressed (which triggers slow
+    // BlocksInfo calls on Lustre for every skipped variable).
+    std::map<std::string, adios2::Params> available_vars = reader_io_2.AvailableVariables();
     std::vector<std::string> var_name;
     std::vector<std::string> var_type;
     for (const auto &var_pair : available_vars) {
         const std::string &name = var_pair.first;
         if (name.find("FlowSolution") != std::string::npos) {
             auto it = var_pair.second.find("Type");
-            if (it != var_pair.second.end() && 
+            if (it != var_pair.second.end() &&
                 (it->second == "double" || it->second == "float")) {
+                // Only include if the variable also exists in the original.
+                auto orig = reader_io_1.AvailableVariables();
+                if (orig.find(name) == orig.end()) continue;
                 var_name.push_back(name);
                 var_type.push_back(it->second);
             }
@@ -147,17 +153,12 @@ int main(int argc, char **argv) {
         // Begin step (skip for first iteration since we already did it)
         if (!first_step) {
             read_status = reader_1.BeginStep(adios2::StepMode::Read, 10.0f);
-            if (read_status == adios2::StepStatus::NotReady) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                continue;
-            } else if (read_status != adios2::StepStatus::OK) {
-                break;
+            if (read_status != adios2::StepStatus::OK) {
+                break;  // EndOfStream, NotReady (past end for file engines), or error
             }
             read_status = reader_2.BeginStep(adios2::StepMode::Read, 10.0f);
-            if (read_status == adios2::StepStatus::NotReady) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                continue;
-            } else if (read_status != adios2::StepStatus::OK) {
+            if (read_status != adios2::StepStatus::OK) {
+                reader_1.EndStep();  // keep reader_1 balanced
                 break;
             }
         }
@@ -180,12 +181,31 @@ int main(int argc, char **argv) {
                 
                 auto bi = reader_1.BlocksInfo(var_ad1, ts);
                 size_t nBlocks = bi.size();
+                // Allow limiting blocks via MAX_BLOCKS env var (useful for quick checks).
+                {
+                    const char *mb = std::getenv("MAX_BLOCKS");
+                    if (mb && *mb) nBlocks = std::min(nBlocks, (size_t)std::stoull(mb));
+                }
+                // BLOCK_OFFSET: shift which original block maps to compressed block 0
+                // (use when the compressed file contains only a subset starting at block N)
+                size_t blockOffset = 0;
+                {
+                    const char *bo = std::getenv("BLOCK_OFFSET");
+                    if (bo && *bo) blockOffset = (size_t)std::stoull(bo);
+                }
+                auto bi2 = reader_2.BlocksInfo(var_ad2, ts);
+                if (bi2.size() < nBlocks) {
+                    if (rank == 0)
+                        std::cout << "  Note: " << var_name[i] << " comparing " << bi2.size()
+                                  << " of " << nBlocks << " blocks (decompressed file has fewer)\n";
+                    nBlocks = bi2.size();
+                }
                 double minv = var_ad1.Min();
                 double maxv = var_ad1.Max();
                 var_value_range[i] = maxv - minv;
                 
                 if (rank == 0)
-                    std::cout << var_name[i] << " (" << nBlocks << " blocks, range: [" 
+                    std::cout << var_name[i] << " (" << nBlocks << " blocks, range: ["
                               << minv << ", " << maxv << "])\n";
 
                 // Contiguous block distribution to preserve block ordering
@@ -193,31 +213,41 @@ int main(int argc, char **argv) {
                 size_t startBlock = rank * blocksPerRank;
                 size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
                 for (size_t blockId = startBlock; blockId < endBlock; blockId++) {
-                    var_ad1.SetBlockSelection(blockId);
+                    size_t origBlockId = blockId + blockOffset;
+                    var_ad1.SetBlockSelection(origBlockId);
                     var_ad2.SetBlockSelection(blockId);
                     
+                    // Compute local block range from BlocksInfo metadata
+                    double loc_min = bi[origBlockId].Min, loc_max = bi[origBlockId].Max;
+                    double loc_range = loc_max - loc_min;
+                    if (rank == 0)
+                        std::cout << "  Block " << origBlockId << " (orig) -> " << blockId
+                                  << " (cmp)/" << nBlocks
+                                  << " local=[" << loc_min << "," << loc_max << "]"<< std::flush;
                     std::vector<double> var_in_1, var_in_2;
                     reader_1.Get(var_ad1, var_in_1, adios2::Mode::Sync);
-                    reader_1.PerformGets();
                     reader_2.Get(var_ad2, var_in_2, adios2::Mode::Sync);
-                    reader_2.PerformGets();
 
-                    if (rank == 0 && nBlocks <= 4) {
-                        std::cout << "  Block " << blockId << " (" << var_in_1.size() << " points):\n";
-                        error_calc(var_name[i], var_in_1.data(), var_in_2.data(), var_in_1.size(), 
-                                   minv, maxv, var_total_abs_err[i], var_total_rmse[i], var_total_count[i]);
-                    } else {
-                        // Silently accumulate for many blocks
-                        double abs_err = 0.0, rmse = 0.0;
-                        for (size_t j = 0; j < var_in_1.size(); j++) {
-                            double diff = std::abs(var_in_1[j] - var_in_2[j]);
-                            abs_err = (abs_err < diff) ? diff : abs_err;
-                            rmse += diff * diff;
-                        }
-                        var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
-                        var_total_rmse[i] += rmse;
-                        var_total_count[i] += var_in_1.size();
+                    double abs_err = 0.0, rmse = 0.0;
+                    for (size_t j = 0; j < var_in_1.size(); j++) {
+                        double diff = std::abs(var_in_1[j] - var_in_2[j]);
+                        abs_err = (abs_err < diff) ? diff : abs_err;
+                        rmse += diff * diff;
                     }
+                    var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
+                    var_total_rmse[i] += rmse;
+                    var_total_count[i] += var_in_1.size();
+                    if (rank == 0)
+                        std::cout << " max_err=" << abs_err
+                                  << " rel_global=" << abs_err / var_value_range[i]
+                                  << " rel_local=" << (loc_range > 0 ? abs_err / loc_range : 0)
+                                  << " (" << var_in_1.size() << " pts)\n";
+                    var_total_rmse[i] += rmse;
+                    var_total_count[i] += var_in_1.size();
+                    if (rank == 0)
+                        std::cout << " max_err=" << abs_err
+                                  << " rel=" << abs_err / var_value_range[i]
+                                  << " (" << var_in_1.size() << " pts)\n";
                 }
             } else {  // float
                 adios2::Variable<float> var_ad1 = reader_io_1.InquireVariable<float>(var_name[i]);
@@ -231,12 +261,28 @@ int main(int argc, char **argv) {
                 
                 auto bi = reader_1.BlocksInfo(var_ad1, ts);
                 size_t nBlocks = bi.size();
+                {
+                    const char *mb = std::getenv("MAX_BLOCKS");
+                    if (mb && *mb) nBlocks = std::min(nBlocks, (size_t)std::stoull(mb));
+                }
+                size_t blockOffset = 0;
+                {
+                    const char *bo = std::getenv("BLOCK_OFFSET");
+                    if (bo && *bo) blockOffset = (size_t)std::stoull(bo);
+                }
+                auto bi2f = reader_2.BlocksInfo(var_ad2, ts);
+                if (bi2f.size() < nBlocks) {
+                    if (rank == 0)
+                        std::cout << "  Note: " << var_name[i] << " comparing " << bi2f.size()
+                                  << " of " << nBlocks << " blocks (decompressed file has fewer)\n";
+                    nBlocks = bi2f.size();
+                }
                 float minv = var_ad1.Min();
                 float maxv = var_ad1.Max();
                 var_value_range[i] = maxv - minv;
                 
                 if (rank == 0)
-                    std::cout << var_name[i] << " (" << nBlocks << " blocks, range: [" 
+                    std::cout << var_name[i] << " (" << nBlocks << " blocks, range: ["
                               << minv << ", " << maxv << "])\n";
 
                 // Contiguous block distribution to preserve block ordering
@@ -244,14 +290,19 @@ int main(int argc, char **argv) {
                 size_t startBlock = rank * blocksPerRank;
                 size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
                 for (size_t blockId = startBlock; blockId < endBlock; blockId++) {
-                    var_ad1.SetBlockSelection(blockId);
+                    size_t origBlockId = blockId + blockOffset;
+                    var_ad1.SetBlockSelection(origBlockId);
                     var_ad2.SetBlockSelection(blockId);
-                    
+
+                    float loc_min = bi[origBlockId].Min, loc_max = bi[origBlockId].Max;
+                    float loc_range = loc_max - loc_min;
+                    if (rank == 0)
+                        std::cout << "  Block " << origBlockId << " (orig) -> " << blockId
+                                  << " (cmp)/" << nBlocks
+                                  << " local=[" << loc_min << "," << loc_max << "]" << std::flush;
                     std::vector<float> var_in_1, var_in_2;
                     reader_1.Get(var_ad1, var_in_1, adios2::Mode::Sync);
-                    reader_1.PerformGets();
                     reader_2.Get(var_ad2, var_in_2, adios2::Mode::Sync);
-                    reader_2.PerformGets();
 
                     // Accumulate errors
                     float abs_err = 0.0f, rmse = 0.0f;
@@ -263,6 +314,11 @@ int main(int argc, char **argv) {
                     var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
                     var_total_rmse[i] += rmse;
                     var_total_count[i] += var_in_1.size();
+                    if (rank == 0)
+                        std::cout << " max_err=" << abs_err
+                                  << " rel_global=" << abs_err / var_value_range[i]
+                                  << " rel_local=" << (loc_range > 0 ? abs_err / loc_range : 0)
+                                  << " (" << var_in_1.size() << " pts)\n";
                 }
             }
         }

@@ -15,7 +15,7 @@
  *                    decompressor can recover bar_u from it).
  *   rel_tolerance  - relative tolerance ε; absolute tolerance per variable is
  *                    ε * (max - min) computed from var.Min() / var.Max().
- *   ebratio        - fraction of the budget allocated to the residual (default 0.5).
+ *   ebratio        - fraction of the budget allocated to the residual (default 0.8).
  *
  * The plugin's `meshfile` parameter points back to <input.bp>, which already
  * holds the uncompressed connectivity at /volume/Elem/ElementConnectivity.
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
     std::string inputFile(argv[1]);
     std::string outputFile(argv[2]);
     double relTol = std::stod(argv[3]);
-    double ebratio = (argc >= 5) ? std::stod(argv[4]) : 0.5;
+    double ebratio = (argc >= 5) ? std::stod(argv[4]) : 0.8;
     // n_blocks from command line (overrides MAX_BLOCKS env var when provided).
     size_t maxBlocksArg = (argc == 6) ? static_cast<size_t>(std::stoull(argv[5]))
                                       : std::numeric_limits<size_t>::max();

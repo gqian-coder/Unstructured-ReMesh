@@ -239,8 +239,20 @@ int main(int argc, char **argv)
                 total_size_bytes += var_in.size() * sizeof(double);
 
                 var_out[i].SetSelection(adios2::Box<adios2::Dims>({}, {var_in.size()}));
-                writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
-                writer.PerformPuts();
+                {
+                    using Clock = std::chrono::steady_clock;
+                    auto t0 = Clock::now();
+                    writer.Put<double>(var_out[i], var_in.data(), adios2::Mode::Sync);
+                    writer.PerformPuts();
+                    double comp_ms = std::chrono::duration<double, std::milli>(
+                        Clock::now() - t0).count();
+                    if (rank == 0)
+                        std::cout << "[mgard] var=" << var_name[i]
+                                  << " block=" << blockId
+                                  << " in=" << (var_in.size() * sizeof(double))
+                                  << " comp_ms=" << std::fixed
+                                  << std::setprecision(2) << comp_ms << "\n";
+                }
             }
         }
         // Pass through all non-FlowSolution double variables block by block.

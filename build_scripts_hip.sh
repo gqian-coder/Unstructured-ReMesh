@@ -1,8 +1,13 @@
 set -x
 set -e
 
+source ~/frontier_model_to_load.sh
+
+unset LD_PRELOAD
+export LIBRARY_PATH=/opt/xpmem/lib64:${LIBRARY_PATH:-}
+
 mgard_install_dir=/lustre/orion/cfd164/proj-shared/gongq/Software/MGARD/install-hip-frontier/
-adios_install_dir=/lustre/orion/proj-shared/cfd164/gongq/Software/ADIOS2/install-adios/
+adios_install_dir=/lustre/orion/cfd164/proj-shared/gongq/Software/ADIOS2/install-adios-cray
 
 export CC=cc
 export CXX=CC
@@ -12,11 +17,17 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export GPU_TARGET=gfx908
 export OMPI_CC=hipcc
 
-#rm build/CMakeCache.txt
+#rm build_cfd164/CMakeCache.txt
 
-cmake -S .  -B ./build\
-            -DCMAKE_PREFIX_PATH="${mgard_install_dir};${adios_install_dir}" 
-            #-DCMAKE_C_COMPILER=hipcc\
-            #-DCMAKE_CXX_COMPILER=hipcc
+cmake -S .  -B ./build_cfd164 \
+            -DCMAKE_PREFIX_PATH="${mgard_install_dir};${adios_install_dir};${ROCM_PATH}" \
+            -DMPI_C_COMPILER=cc \
+            -DMPI_CXX_COMPILER=CC \
+            -DMPI_C_INCLUDE_PATH="${CRAY_MPICH_DIR}/include" \
+            -DMPI_CXX_INCLUDE_PATH="${CRAY_MPICH_DIR}/include" \
+            -DMPI_C_LIB_NAMES=mpi_cray \
+            -DMPI_CXX_LIB_NAMES=mpi_cray \
+            -DMPI_mpi_cray_LIBRARY="${CRAY_MPICH_DIR}/lib/libmpi_cray.so" \
+            -DCMAKE_BUILD_TYPE=Release
 
-cmake --build ./build
+cmake --build ./build_cfd164 -- -j8

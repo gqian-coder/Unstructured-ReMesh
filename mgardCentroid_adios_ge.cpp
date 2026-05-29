@@ -134,6 +134,21 @@ int main(int argc, char **argv)
                 varNames.push_back(name);
         }
     }
+    // FLOW_VAR_LIST=P_aver,Rho_aver : keep only the listed short names.
+    if (const char *vlist = std::getenv("FLOW_VAR_LIST"); vlist && *vlist)
+    {
+        std::istringstream ss(vlist);
+        std::string tok;
+        std::vector<std::string> allowed;
+        while (std::getline(ss, tok, ','))
+            if (!tok.empty()) allowed.push_back(std::string(FLOW_PREFIX) + tok);
+        std::vector<std::string> filtered;
+        for (auto &n : varNames)
+            for (auto &a : allowed)
+                if (n == a) { filtered.push_back(n); break; }
+        varNames = std::move(filtered);
+    }
+
     if (varNames.empty())
     {
         if (rank == 0)
@@ -204,6 +219,7 @@ int main(int argc, char **argv)
     // ----- Operator parameters template ------------------------------------
     adios2::Params params;
     params["PluginName"]            = "mgardCentroid";
+    params["verbose"]               = "0";
     // Set CENTROID_GPU=1 at runtime to use the GPU (HIP) operator.
     const bool useGPU = (std::getenv("CENTROID_GPU") != nullptr &&
                          std::string(std::getenv("CENTROID_GPU")) == "1");

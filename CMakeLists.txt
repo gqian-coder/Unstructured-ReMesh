@@ -91,12 +91,11 @@ target_link_libraries(mgard_adios_decompress_remesh adios2::adios2 MPI::MPI_C mg
 add_executable(calc_err calc_err.cpp)
 target_link_libraries(calc_err adios2::adios2 MPI::MPI_C mgard::mgard)
 
-# Single-block MGARD-API compression ratio test (no ADIOS2 operator layer).
-add_executable(mgard_cr_block mgard_cr_block.cpp)
-target_link_libraries(mgard_cr_block adios2::adios2 MPI::MPI_C mgard::mgard)
-
 # Cell-centroid (cell-average + nodal-residual) compression wrapper.
 # Uses CompressMGARDCentroidOperator ADIOS2 plugin loaded at runtime via
 # ADIOS2_PLUGIN_PATH; no compile-time link against the plugin needed.
 add_executable(mgardCentroid_adios_ge mgardCentroid_adios_ge.cpp)
 target_link_libraries(mgardCentroid_adios_ge adios2::adios2 MPI::MPI_C mgard::mgard)
+
+add_executable(mgardCentroid_adios_decompress mgardCentroid_adios_decompress.cpp)
+target_link_libraries(mgardCentroid_adios_decompress adios2::adios2 MPI::MPI_C mgard::mgard)

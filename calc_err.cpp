@@ -69,9 +69,15 @@ int main(int argc, char **argv) {
     adios2::IO reader_io_1 = ad.DeclareIO("Input1");
     adios2::IO reader_io_2 = ad.DeclareIO("Input2");
 
+    // Optional: error bound for PASS/FAIL check (relative, same as compression eb)
+    double eb_check = 0.0;
+    if (const char *e = std::getenv("EB"); e && *e)
+        try { eb_check = std::stod(e); } catch (...) {}
+
     if (rank == 0) {
         std::cout << "Original file:   " << fname1 << "\n";
         std::cout << "Compressed file: " << fname2 << "\n";
+        if (eb_check > 0) std::cout << "EB check:        " << eb_check << "\n";
     }
     
     adios2::Engine reader_1 = reader_io_1.Open(fname1, adios2::Mode::Read);
@@ -237,17 +243,22 @@ int main(int argc, char **argv) {
                     var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
                     var_total_rmse[i] += rmse;
                     var_total_count[i] += var_in_1.size();
-                    if (rank == 0)
-                        std::cout << " max_err=" << abs_err
-                                  << " rel_global=" << abs_err / var_value_range[i]
-                                  << " rel_local=" << (loc_range > 0 ? abs_err / loc_range : 0)
-                                  << " (" << var_in_1.size() << " pts)\n";
-                    var_total_rmse[i] += rmse;
-                    var_total_count[i] += var_in_1.size();
-                    if (rank == 0)
-                        std::cout << " max_err=" << abs_err
-                                  << " rel=" << abs_err / var_value_range[i]
-                                  << " (" << var_in_1.size() << " pts)\n";
+                    {
+                        double block_rmse = (var_in_1.size() > 0)
+                            ? std::sqrt(rmse / (double)var_in_1.size()) : 0.0;
+                        double rel_linf  = (loc_range > 0) ? abs_err   / loc_range : 0.0;
+                        double rel_rmse  = (loc_range > 0) ? block_rmse / loc_range : 0.0;
+                        if (rank == 0) {
+                            std::cout << std::scientific << std::setprecision(4)
+                                      << " linf=" << abs_err
+                                      << " rel_linf=" << rel_linf
+                                      << " rmse=" << block_rmse
+                                      << " rel_rmse=" << rel_rmse;
+                            if (eb_check > 0)
+                                std::cout << (rel_rmse <= eb_check ? " PASS" : " FAIL");
+                            std::cout << " (" << var_in_1.size() << " pts)\n";
+                        }
+                    }
                 }
             } else {  // float
                 adios2::Variable<float> var_ad1 = reader_io_1.InquireVariable<float>(var_name[i]);
@@ -314,11 +325,22 @@ int main(int argc, char **argv) {
                     var_total_abs_err[i] = (var_total_abs_err[i] < abs_err) ? abs_err : var_total_abs_err[i];
                     var_total_rmse[i] += rmse;
                     var_total_count[i] += var_in_1.size();
-                    if (rank == 0)
-                        std::cout << " max_err=" << abs_err
-                                  << " rel_global=" << abs_err / var_value_range[i]
-                                  << " rel_local=" << (loc_range > 0 ? abs_err / loc_range : 0)
-                                  << " (" << var_in_1.size() << " pts)\n";
+                    {
+                        float block_rmse = (var_in_1.size() > 0)
+                            ? std::sqrt(rmse / (float)var_in_1.size()) : 0.0f;
+                        float rel_linf  = (loc_range > 0) ? abs_err    / loc_range : 0.0f;
+                        float rel_rmse  = (loc_range > 0) ? block_rmse / loc_range : 0.0f;
+                        if (rank == 0) {
+                            std::cout << std::scientific << std::setprecision(4)
+                                      << " linf=" << abs_err
+                                      << " rel_linf=" << rel_linf
+                                      << " rmse=" << block_rmse
+                                      << " rel_rmse=" << rel_rmse;
+                            if (eb_check > 0)
+                                std::cout << (rel_rmse <= (float)eb_check ? " PASS" : " FAIL");
+                            std::cout << " (" << var_in_1.size() << " pts)\n";
+                        }
+                    }
                 }
             }
         }

@@ -106,6 +106,20 @@ int main(int argc, char **argv)
                   << flowFloat.size() << " float; connectivity in file: "
                   << (hasConn ? "yes" : "no") << "\n";
     }
+
+    // Self-contained decompression: if connectivity was passed through into the
+    // compressed file, default the operator's mesh source to this file so no
+    // external mesh or env vars are needed (coordinates for the SFC inverse are
+    // read from here too, when present). A user-provided CENTROID_MESHFILE /
+    // CENTROID_CONN_VAR still takes priority (setenv overwrite flag = 0).
+    if (hasConn)
+    {
+        setenv("CENTROID_MESHFILE", inputFile.c_str(), 0);
+        setenv("CENTROID_CONN_VAR", CONN_VAR, 0);
+        if (rank == 0)
+            std::cout << "Self-contained: connectivity/coordinates read from the compressed file "
+                         "(CENTROID_MESHFILE defaulted to input).\n";
+    }
     if (flowDouble.empty() && flowFloat.empty())
     {
         if (rank == 0)

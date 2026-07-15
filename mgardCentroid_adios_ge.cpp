@@ -71,6 +71,29 @@ size_t NodesPerCellFromElementType(const std::string &etype)
     if (etype == "TRI_3")   return 3;
     return 0;
 }
+
+// Parse "--norm=range|l2" from argv (in place), default "range".
+std::string parse_norm_mode(int &argc, char **argv)
+{
+    std::string mode = "range";
+    int w = 1;
+    for (int r = 1; r < argc; ++r)
+    {
+        std::string a = argv[r];
+        if (a.rfind("--norm=", 0) == 0)
+            mode = a.substr(7);
+        else
+            argv[w++] = argv[r];
+    }
+    argc = w;
+    if (mode != "range" && mode != "l2")
+    {
+        std::cerr << "Invalid --norm value: '" << mode << "' (use range|l2)\n";
+        std::exit(1);
+    }
+    return mode;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -80,12 +103,15 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &np_size);
 
+    // Parse --norm=range|l2 (default range). Removes flag from argv.
+    std::string norm_mode = parse_norm_mode(argc, argv);
+
     if (argc < 4 || argc > 6)
     {
         if (rank == 0)
         {
             std::cerr << "Usage: " << argv[0]
-                      << " <input.bp> <output.bp> <rel_tolerance> [ebratio [n_blocks]]\n";
+                      << " <input.bp> <output.bp> <rel_tolerance> [ebratio [n_blocks]] [--norm=range|l2]\n";
         }
         MPI_Finalize();
         return 1;
@@ -106,7 +132,8 @@ int main(int argc, char **argv)
     {
         std::cout << "Input file:    " << inputFile << "\n"
                   << "Output file:   " << outputFile << "\n"
-                  << "Rel tolerance: " << relTol << "\n"
+                  << "Rel tolerance: " << relTol << " (per-block, normalized by "
+                  << norm_mode << ")\n"
                   << "ebratio:       " << ebratio << " (residual fraction)\n";
     }
 
@@ -201,6 +228,26 @@ int main(int argc, char **argv)
     auto vConnOut = writer_io.DefineVariable<int64_t>(CONN_VAR, {}, {}, {adios2::UnknownDim});
     writer_io.DefineAttribute<std::string>(ETYPE_ATTR, elemType);
 
+    // Coordinate passthrough (X/Y/Z). Written together with connectivity so the
+    // compressed file is self-contained for decompression (the SFC inverse needs
+    // coordinates). Only if the coordinate variables exist in the input.
+    const std::string COORD_PREFIX = std::string(ZONE) + "/GridCoordinates/Coordinate";
+    const char coordAxis[3] = {'X', 'Y', 'Z'};
+    std::vector<adios2::Variable<double>> vCoordIn(3), vCoordOut(3);
+    bool haveCoords = true;
+    for (int a = 0; a < 3; ++a)
+    {
+        vCoordIn[a] = reader_io.InquireVariable<double>(COORD_PREFIX + coordAxis[a]);
+        if (!vCoordIn[a]) { haveCoords = false; break; }
+    }
+    if (haveCoords)
+        for (int a = 0; a < 3; ++a)
+            vCoordOut[a] = writer_io.DefineVariable<double>(COORD_PREFIX + coordAxis[a], {}, {},
+                                                            {adios2::UnknownDim});
+    else if (rank == 0)
+        std::cout << "Note: GridCoordinates not found; self-contained decompression with SFC "
+                     "will still require an external mesh for coordinates.\n";
+
     // Compressed FlowSolution outputs.
     std::vector<adios2::Variable<double>> varOut(varNames.size());
     for (size_t i = 0; i < varNames.size(); ++i)
@@ -229,7 +276,11 @@ int main(int argc, char **argv)
     params["connectivity_variable"] = CONN_VAR;
     params["nodes_per_cell"]        = std::to_string(nodesPerCell);
     params["ebratio"]               = to_string_ld(ebratio);
-    params["mode"]                  = "ABS";
+    // The operator now performs the relative->absolute tolerance conversion
+    // internally (min/max or L2 norm computed on the device); map the driver's
+    // --norm selector to the operator's mode and pass the RELATIVE tolerance.
+    params["mode"]                  = (norm_mode == "l2") ? "REL_L2" : "REL_VAL";
+    params["tolerance"]             = to_string_ld(relTol);
     // Allow override via env var (MGARD_RESIDUAL_METHOD={mgard|huffman}) for
     // experimentation; default to huffman (typically denser on quantized
     // small-magnitude residuals).
@@ -298,6 +349,18 @@ int main(int argc, char **argv)
                 reader.Get(vConnIn, conn, adios2::Mode::Sync);
                 vConnOut.SetSelection({{}, {conn.size()}});
                 writer.Put(vConnOut, conn.data(), adios2::Mode::Sync);
+
+                if (haveCoords)
+                {
+                    for (int a = 0; a < 3; ++a)
+                    {
+                        vCoordIn[a].SetBlockSelection(bid);
+                        std::vector<double> crd;
+                        reader.Get(vCoordIn[a], crd, adios2::Mode::Sync);
+                        vCoordOut[a].SetSelection({{}, {crd.size()}});
+                        writer.Put(vCoordOut[a], crd.data(), adios2::Mode::Sync);
+                    }
+                }
             }
         }
 
@@ -306,12 +369,12 @@ int main(int argc, char **argv)
         for (size_t i = 0; i < varCount; ++i)
         {
             auto vIn = reader_io.InquireVariable<double>(varNames[i]);
-            double minv = vIn.Min(), maxv = vIn.Max();
-            double absTol = relTol * (maxv - minv);
-            params["tolerance"] = to_string_ld(absTol);
+            // Per-block min/max from ADIOS2 BlocksInfo (avoids reading data
+            // when norm_mode == "range").
+            auto bInfo = reader.BlocksInfo(vIn, reader.CurrentStep());
             if (rank == 0)
-                std::cout << "  " << varNames[i] << ": min/max=" << minv << "/" << maxv
-                          << ", abs_tol=" << absTol << "\n";
+                std::cout << "  " << varNames[i] << " (" << bInfo.size()
+                          << " blocks, per-block tol norm=" << norm_mode << ")\n";
 
             size_t bEnd = std::min(endBlock, startBlock + maxBlocks);
             for (size_t bid = startBlock; bid < bEnd; ++bid)
@@ -322,6 +385,10 @@ int main(int argc, char **argv)
                 reader.Get(vIn, buf, adios2::Mode::Sync);
                 totalBytesIn += buf.size() * sizeof(double);
 
+                // The operator computes the normalization and the relative->
+                // absolute tolerance conversion internally (set CENTROID_DEBUG=1
+                // for the operator to print the derived abs_tol per block).
+                (void)bInfo;
                 params["blockid"] = std::to_string(bid);
                 varOut[i].RemoveOperations();
                 varOut[i].AddOperation("plugin", params);

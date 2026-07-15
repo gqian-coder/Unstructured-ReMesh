@@ -6,7 +6,7 @@ source ~/frontier_model_to_load.sh
 unset LD_PRELOAD
 export LIBRARY_PATH=/opt/xpmem/lib64:${LIBRARY_PATH:-}
 
-mgard_install_dir=/lustre/orion/cfd164/proj-shared/gongq/Software/MGARD/install-hip-frontier/
+mgard_install_dir=/ccs/proj/cfd164/mgard
 adios_install_dir=/lustre/orion/cfd164/proj-shared/gongq/Software/ADIOS2/install-adios-cray
 
 export CC=cc

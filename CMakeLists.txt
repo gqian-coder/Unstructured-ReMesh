@@ -99,3 +99,18 @@ target_link_libraries(mgardCentroid_adios_ge adios2::adios2 MPI::MPI_C mgard::mg
 
 add_executable(mgardCentroid_adios_decompress mgardCentroid_adios_decompress.cpp)
 target_link_libraries(mgardCentroid_adios_decompress adios2::adios2 MPI::MPI_C mgard::mgard)
+
+# Multi-GPU block distribution: the centroid wrappers bind each MPI rank to
+# GPU (rank % ngpus) so the plugin's HIP kernels land on distinct devices.
+# HIP is only needed for hipGetDeviceCount/hipSetDevice; without it the
+# wrappers still build and fall back to the plugin's CPU path.
+find_package(hip QUIET)
+if(hip_FOUND)
+    foreach(_t mgardCentroid_adios_ge mgardCentroid_adios_decompress)
+        target_compile_definitions(${_t} PRIVATE CMG_WRAPPER_HAVE_HIP __HIP_PLATFORM_AMD__)
+        target_link_libraries(${_t} hip::host)
+    endforeach()
+    message(STATUS "mgardCentroid wrappers: multi-GPU rank->device binding enabled")
+else()
+    message(STATUS "mgardCentroid wrappers: HIP not found, GPU binding disabled")
+endif()

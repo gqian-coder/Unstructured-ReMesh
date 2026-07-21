@@ -35,13 +35,16 @@
 
 #include "adios2.h"
 #include "mpi.h"
+#ifdef CMG_WRAPPER_HAVE_HIP
+#include <hip/hip_runtime.h>
+#endif
 
 namespace
 {
-constexpr const char *ZONE = "/hpMusic_base/hpMusic_Zone";
-constexpr const char *FLOW_PREFIX = "/hpMusic_base/hpMusic_Zone/FlowSolution/";
-constexpr const char *CONN_VAR = "/hpMusic_base/hpMusic_Zone/Elem/ElementConnectivity";
-constexpr const char *ETYPE_ATTR = "/hpMusic_base/hpMusic_Zone/Elem/ElementType";
+constexpr const char *ZONE = "/volume";
+constexpr const char *FLOW_PREFIX = "/volume/FlowSolution/";
+constexpr const char *CONN_VAR = "/volume/Elem/ElementConnectivity";
+constexpr const char *ETYPE_ATTR = "/volume/Elem/ElementType";
 
 std::string to_string_ld(long double number)
 {
@@ -70,6 +73,67 @@ size_t NodesPerCellFromElementType(const std::string &etype)
     if (etype == "QUAD_4")  return 4;
     if (etype == "TRI_3")   return 3;
     return 0;
+}
+
+/* ---------------- multi-GPU block distribution ------------------------
+ *
+ * A Frontier node exposes 8 GPU agents (4 MI250X x 2 GCDs). Each MPI rank
+ * binds to GPU (rank % ngpus) via hipSetDevice; the centroid plugin's kernels
+ * then launch on that device because HIP's current device is per-thread and
+ * the operator runs inline in the caller's thread during Put().
+ *
+ * Run one rank per GPU, e.g.:   srun -n8 --gpus-per-node=8 mgardCentroid_adios_ge ...
+ * (add CENTROID_DEVICE=gpu so the operator uses its HIP kernels at all.)
+ *
+ * Block->rank mapping, selected by CENTROID_BLOCK_DIST:
+ *   contiguous (default) : rank r takes [r*k, (r+1)*k).  Output block order
+ *                          matches the input, because ADIOS orders blocks
+ *                          rank-major and each rank holds a contiguous run.
+ *   roundrobin           : rank r takes blocks r, r+np, r+2np, ...  Balances
+ *                          better (block sizes here vary 3.2M-4.4M nodes) but
+ *                          RE-ORDERS the output: with 8 ranks the file holds
+ *                          0,8,16,... then 1,9,17,..., so output block i no
+ *                          longer corresponds to input block i. Only use it
+ *                          when downstream tooling keys off the blockId stored
+ *                          in the bitstream rather than position.
+ */
+enum class BlockDist { Contiguous, RoundRobin };
+
+BlockDist ParseBlockDist()
+{
+    if (const char *e = std::getenv("CENTROID_BLOCK_DIST"))
+    {
+        std::string s(e);
+        for (auto &c : s) c = (char)std::tolower((unsigned char)c);
+        if (s == "roundrobin" || s == "rr" || s == "round_robin") return BlockDist::RoundRobin;
+    }
+    return BlockDist::Contiguous;
+}
+
+bool OwnsBlock(BlockDist d, size_t bid, int rank, int np, size_t nBlocks)
+{
+    if (d == BlockDist::RoundRobin) return (bid % (size_t)np) == (size_t)rank;
+    const size_t per   = (nBlocks + (size_t)np - 1) / (size_t)np;
+    const size_t start = (size_t)rank * per;
+    return bid >= start && bid < std::min(start + per, nBlocks);
+}
+
+/* Bind this rank to a GPU. Returns the device index, or -1 when HIP is
+ * unavailable or no device is present (then the plugin's CPU path is used). */
+int BindRankToGpu(int rank, int &ngpusOut)
+{
+    ngpusOut = 0;
+#ifdef CMG_WRAPPER_HAVE_HIP
+    int n = 0;
+    if (hipGetDeviceCount(&n) != hipSuccess || n <= 0) return -1;
+    ngpusOut = n;
+    const int dev = rank % n;
+    if (hipSetDevice(dev) != hipSuccess) return -1;
+    return dev;
+#else
+    (void)rank;
+    return -1;
+#endif
 }
 
 // Parse "--norm=range|l2" from argv (in place), default "range".
@@ -257,11 +321,25 @@ int main(int argc, char **argv)
     auto v0 = reader_io.InquireVariable<double>(varNames[0]);
     size_t nBlocks = reader.BlocksInfo(v0, 0).size();
 
-    // Contiguous block distribution to preserve ordering in output.
-    size_t blocksPerRank = (nBlocks + np_size - 1) / np_size;
-    size_t startBlock = static_cast<size_t>(rank) * blocksPerRank;
-    size_t endBlock = std::min(startBlock + blocksPerRank, nBlocks);
-    std::cout << "rank " << rank << ": blocks [" << startBlock << ", " << endBlock << ")\n";
+    // Block distribution + GPU binding (see BlockDist notes above).
+    const BlockDist blockDist = ParseBlockDist();
+    int nGpus = 0;
+    const int myGpu = BindRankToGpu(rank, nGpus);
+    {
+        std::string mine;
+        size_t shown = 0;
+        for (size_t b = 0; b < nBlocks; ++b)
+            if (OwnsBlock(blockDist, b, rank, np_size, nBlocks))
+            {
+                if (shown < 6) { mine += (shown ? "," : "") + std::to_string(b); ++shown; }
+                else if (shown == 6) { mine += ",..."; ++shown; }
+            }
+        std::cout << "rank " << rank << "/" << np_size
+                  << (myGpu >= 0 ? " -> gpu " + std::to_string(myGpu) + "/" + std::to_string(nGpus)
+                                 : std::string(" -> cpu"))
+                  << "  dist=" << (blockDist == BlockDist::RoundRobin ? "roundrobin" : "contiguous")
+                  << "  blocks: " << (mine.empty() ? std::string("none") : mine) << "\n";
+    }
 
     // ----- Operator parameters template ------------------------------------
     adios2::Params params;
@@ -342,8 +420,9 @@ int main(int argc, char **argv)
         // FlowSolution data for accurate compression-ratio measurement.
         if (ts == 0 && !no_passthrough)
         {
-            for (size_t bid = startBlock; bid < endBlock; ++bid)
+            for (size_t bid = 0; bid < nBlocks; ++bid)
             {
+                if (!OwnsBlock(blockDist, bid, rank, np_size, nBlocks)) continue;
                 vConnIn.SetBlockSelection(bid);
                 std::vector<int64_t> conn;
                 reader.Get(vConnIn, conn, adios2::Mode::Sync);
@@ -376,9 +455,10 @@ int main(int argc, char **argv)
                 std::cout << "  " << varNames[i] << " (" << bInfo.size()
                           << " blocks, per-block tol norm=" << norm_mode << ")\n";
 
-            size_t bEnd = std::min(endBlock, startBlock + maxBlocks);
-            for (size_t bid = startBlock; bid < bEnd; ++bid)
+            const size_t bEnd = std::min(nBlocks, maxBlocks);
+            for (size_t bid = 0; bid < bEnd; ++bid)
             {
+                if (!OwnsBlock(blockDist, bid, rank, np_size, nBlocks)) continue;
                 std::cout << "Compress block " << bid << "\n";
                 vIn.SetBlockSelection(bid);
                 std::vector<double> buf;

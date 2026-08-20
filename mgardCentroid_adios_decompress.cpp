@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <string>
@@ -40,12 +41,12 @@ namespace
 const std::string FLOW_PREFIX = [] {
     if (const char *e = std::getenv("CENTROID_FLOW_PREFIX")) return std::string(e);
     if (const char *z = std::getenv("CENTROID_ZONE")) return std::string(z) + "/FlowSolution/";
-    return std::string("/hpMusic_base/hpMusic_Zone/FlowSolution/");
+    return std::string("/volume/FlowSolution/");
 }();
 const std::string CONN_VAR = [] {
     if (const char *e = std::getenv("CENTROID_CONN_VAR")) return std::string(e);
     if (const char *z = std::getenv("CENTROID_ZONE")) return std::string(z) + "/Elem/ElementConnectivity";
-    return std::string("/hpMusic_base/hpMusic_Zone/Elem/ElementConnectivity");
+    return std::string("/volume/Elem/ElementConnectivity");
 }();
 } // namespace
 
@@ -180,18 +181,38 @@ int main(int argc, char **argv)
                   << (hasConn ? "yes" : "no") << "\n";
     }
 
-    // Self-contained decompression: if connectivity was passed through into the
-    // compressed file, default the operator's mesh source to this file so no
-    // external mesh or env vars are needed (coordinates for the SFC inverse are
-    // read from here too, when present). A user-provided CENTROID_MESHFILE /
-    // CENTROID_CONN_VAR still takes priority (setenv overwrite flag = 0).
-    if (hasConn)
+    // Self-contained decompression needs no help from this tool: the operator
+    // embeds the connectivity/coordinate variable names in the bitstream and
+    // defaults the mesh file to whatever file it is decoding. Setting the env
+    // vars here used to do that job, but it tied the default to CONN_VAR
+    // matching a variable in this file -- so naming a variable that was not
+    // present silently disabled the default instead of overriding it.
+    //
+    // The two env vars are only for pointing at an EXTERNAL mesh, and they are
+    // meaningful only as a pair, so reject a half-configured environment here
+    // rather than letting it surface one block into the read.
     {
-        setenv("CENTROID_MESHFILE", inputFile.c_str(), 0);
-        setenv("CENTROID_CONN_VAR", CONN_VAR.c_str(), 0);
+        const char *envMesh = std::getenv("CENTROID_MESHFILE");
+        const char *envConn = std::getenv("CENTROID_CONN_VAR");
+        const bool haveMesh = envMesh && *envMesh;
+        const bool haveConn = envConn && *envConn;
+        if (haveMesh != haveConn)
+        {
+            if (rank == 0)
+                std::cerr << "ERROR: " << (haveMesh ? "CENTROID_MESHFILE" : "CENTROID_CONN_VAR")
+                          << " is set but " << (haveMesh ? "CENTROID_CONN_VAR" : "CENTROID_MESHFILE")
+                          << " is not. Set both to read an external mesh, or neither to read the "
+                             "mesh from the compressed file.\n";
+            reader.Close(); writer.Close(); MPI_Finalize(); return 1;
+        }
         if (rank == 0)
-            std::cout << "Self-contained: connectivity/coordinates read from the compressed file "
-                         "(CENTROID_MESHFILE defaulted to input).\n";
+        {
+            if (haveMesh)
+                std::cout << "External mesh: " << envMesh << " (" << envConn << ")\n";
+            else
+                std::cout << "Self-contained: connectivity/coordinates read from the compressed "
+                             "file, named by the bitstream header.\n";
+        }
     }
     if (flowDouble.empty() && flowFloat.empty())
     {
